@@ -1,0 +1,3 @@
+# esbuild (via tsup) works without its postinstall; keep install-time code off (doc 12.13).
+allowBuilds:
+  esbuild: false
