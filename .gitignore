@@ -1,0 +1,57 @@
+# dependencies
+/node_modules
+.pnpm-debug.log*
+
+# build and test output
+/dist
+/coverage
+*.tsbuildinfo
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# env files: real values never enter the repo; the example stays committed
+.env*
+!.env.example
+
+# wp2payload runtime: state, reports, quarantine and client backups (Runbook 7.5)
+.wp2payload/
+/backups/
+*.sql
+*.sql.gz
+*.wpress
+
+# misc
+.DS_Store
+*.pem
+/certs/
+*.log
+npm-debug.log*
+/tmp/
+/.tmp/
+/scratch/
+
+# claude-team-kit: local development workflow, not part of the published project.
+# It stays on disk for the agents; reinstall with the kit's install.ps1 if lost.
+/.claude/
+/CLAUDE.md
+/.mcp.json
+/specs/
+/reports/
+/evals/
+/docs/claude-team/
+/docs/design/
+/scripts/claude-team/
+/scripts/figma.mjs
+/scripts/visual-diff.mjs
+/scripts/token-report.mjs
+/tests/smoke.mjs
+/tests/a11y.mjs
+.figma/
+.playwright-mcp/
+
+# real client or personal data never enters the repo
+*.xlsx
+*.xls
+private/

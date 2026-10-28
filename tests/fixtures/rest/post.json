@@ -1,0 +1,28 @@
+{
+  "id": 42,
+  "date": "2024-03-01T10:00:00",
+  "date_gmt": "2024-03-01T09:00:00",
+  "modified": "2024-03-02T11:00:00",
+  "modified_gmt": "2024-03-02T10:00:00",
+  "slug": "hello-world",
+  "status": "publish",
+  "type": "post",
+  "link": "https://example.com/hello-world/",
+  "title": { "raw": "Tom &amp; Jerry&#8217;s &#x41;dventure", "rendered": "Tom &amp; Jerry&#8217;s Adventure" },
+  "content": { "raw": "<!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph -->", "rendered": "<p>Hi</p>" },
+  "excerpt": { "raw": "", "rendered": "<p>Short &hellip; text</p>\n" },
+  "author": 3,
+  "featured_media": 0,
+  "parent": 0,
+  "categories": [5, 6],
+  "tags": [9],
+  "format": "standard",
+  "meta": {},
+  "yoast_head_json": {
+    "title": "Hello &amp; welcome - Example",
+    "description": "A description",
+    "canonical": "https://example.com/hello-world/",
+    "robots": { "index": "noindex", "follow": "follow" },
+    "og_image": [{ "url": "https://example.com/a.jpg", "width": 100 }]
+  }
+}

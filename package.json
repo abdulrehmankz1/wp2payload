@@ -1,0 +1,60 @@
+{
+  "name": "wp2payload",
+  "version": "0.0.1",
+  "description": "Migrate WordPress sites into Payload CMS: posts, pages, media, SEO and redirects.",
+  "license": "MIT",
+  "author": "Abdul Rehman (https://github.com/abdulrehmankz1)",
+  "type": "module",
+  "bin": {
+    "wp2payload": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/types/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@12.16.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abdulrehmankz1/wp2payload.git"
+  },
+  "homepage": "https://github.com/abdulrehmankz1/wp2payload#readme",
+  "bugs": {
+    "url": "https://github.com/abdulrehmankz1/wp2payload/issues"
+  },
+  "keywords": [
+    "payload",
+    "payloadcms",
+    "wordpress",
+    "migration",
+    "cli",
+    "headless-cms"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "jiti": "^2.7.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsup": "^9.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
