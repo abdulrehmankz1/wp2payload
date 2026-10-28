@@ -1,0 +1,62 @@
+# wp2payload local WordPress fixture (throwaway, local only).
+# Start: docker compose up -d   then: node scripts/fixture-seed.mjs
+# Reset: docker compose down -v
+# All credentials below are obviously fake and only reachable on 127.0.0.1.
+name: wp2payload-fixture
+
+x-wp-env: &wp-env
+  WORDPRESS_DB_HOST: db
+  WORDPRESS_DB_USER: wp2p_fixture
+  WORDPRESS_DB_PASSWORD: fixture-only-not-a-secret
+  WORDPRESS_DB_NAME: wordpress
+  WORDPRESS_CONFIG_EXTRA: |
+    define('WP_ENVIRONMENT_TYPE', 'local');
+
+services:
+  db:
+    image: mysql:8.4@sha256:a0225d1ea6631c8bc2385dc4c2faba17bbf1834ecf369e1659a9a382bd8d5dd7
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wp2p_fixture
+      MYSQL_PASSWORD: fixture-only-not-a-secret
+      MYSQL_ROOT_PASSWORD: fixture-root-not-a-secret
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -pfixture-root-not-a-secret --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  wordpress:
+    image: wordpress:php8.3-apache@sha256:8901759bfbb7ebc567dbc44a244c0d96d720d0a67c17bc4f42ec355ddba2e863
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      <<: *wp-env
+    volumes:
+      - wp_data:/var/www/html
+
+  # Seeding only: `docker compose run --rm wpcli wp ...` (not started by `up`).
+  wpcli:
+    image: wordpress:cli-php8.3@sha256:661db880e953da051abcac6c0a769767b995a82cd52101c003ca7438dd427d7d
+    profiles: ["tools"]
+    user: "33:33"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *wp-env
+      HOME: /tmp
+    volumes:
+      - wp_data:/var/www/html
+      - ./tests/fixtures/wordpress/.cache:/fixture:ro
+
+volumes:
+  db_data:
+  wp_data:

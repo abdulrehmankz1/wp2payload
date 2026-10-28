@@ -44,7 +44,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "fixture:up": "docker compose up -d",
+    "fixture:seed": "node scripts/fixture-seed.mjs",
+    "fixture:down": "docker compose down -v"
   },
   "dependencies": {
     "commander": "^15.0.0",
