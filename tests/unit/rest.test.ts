@@ -157,6 +157,30 @@ describe('mapping (AC-S3-2)', () => {
   })
 })
 
+describe('Yoast collection bug (found against the live fixture)', () => {
+  const shared = { title: 'Hello world! - Site', canonical: 'https://example.com/hello-world/' }
+  const item = (id: number, slug: string) => ({
+    id, slug, status: 'publish', type: 'post', link: `https://example.com/${slug}/`,
+    title: { rendered: slug }, content: { rendered: '' }, date_gmt: '2020-01-01T00:00:00', modified_gmt: '2020-01-01T00:00:00',
+    yoast_head_json: shared,
+  })
+
+  it('re-reads the single item when the list canonical belongs to another post', async () => {
+    const { ex, calls } = make((url) => {
+      if (url.pathname === '/wp-json/wp/v2/posts') return { body: [item(1, 'hello-world'), item(2, 'image-alignment')], headers: { 'x-wp-totalpages': '1' } }
+      if (url.pathname === '/wp-json/wp/v2/posts/2') {
+        expect(url.searchParams.get('_fields')).toBe('yoast_head_json')
+        return { body: { yoast_head_json: { title: 'Own title', canonical: 'https://example.com/image-alignment/' } } }
+      }
+      return { body: [], headers: { 'x-wp-totalpages': '1' } }
+    })
+    const docs = await collect(ex.documents())
+    expect(docs.map((d) => d.seo?.title)).toEqual(['Hello world! - Site', 'Own title'])
+    // Post 1's list data already matched its own URL, so only post 2 was re-read.
+    expect(calls.filter((c) => /\/posts\/\d+/.test(new URL(c.url).pathname))).toHaveLength(1)
+  })
+})
+
 describe('transport security (AC-S3-3)', () => {
   it('rejects http for a public host before any request', async () => {
     const { ex, calls } = make(() => ({ body: {} }), { url: 'http://example.com' })

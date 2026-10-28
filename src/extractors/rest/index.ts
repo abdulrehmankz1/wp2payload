@@ -156,7 +156,17 @@ export class RestExtractor implements Extractor {
     if (this.#c.authenticated) query.context = 'edit'
     for (const [ep, type] of [['posts', 'post'], ['pages', 'page']] as const) {
       for await (const p of this.#pages(`/wp-json/wp/v2/${ep}`, query)) {
-        yield mapDocument(p, type)
+        const doc = mapDocument(p, type)
+        if (isObj(p.yoast_head_json) && !sameUrl(str(p.yoast_head_json.canonical), doc.link)) {
+          // Yoast fills yoast_head_json in collection responses from one shared query, so every
+          // item can carry another post's SEO. Seen on Yoast 28.8 / WP 6.x. The single-item
+          // endpoint is correct, so re-read it whenever the canonical does not match the post.
+          const single = await this.#c.get(`/wp-json/wp/v2/${ep}/${doc.wpId}`, { ...query, _fields: 'yoast_head_json' })
+          const seo = isObj(single.json) ? mapSeo(single.json.yoast_head_json) : undefined
+          if (seo) doc.seo = seo
+          else delete doc.seo
+        }
+        yield doc
       }
     }
   }
@@ -181,6 +191,21 @@ async function* chain(first: IteratorResult<Json>, it: AsyncIterator<Json>): Asy
     yield cur.value
     cur = await it.next()
   }
+}
+
+function sameUrl(a: string | undefined, b: string): boolean {
+  if (!a) return false
+  // WordPress percent-encodes non-ASCII slugs in `link`; Yoast prints them decoded.
+  const norm = (u: string) => {
+    let out = u
+    try {
+      out = decodeURI(u)
+    } catch {
+      // Malformed escapes: compare as-is.
+    }
+    return out.replace(/\/+$/, '').toLowerCase()
+  }
+  return norm(a) === norm(b)
 }
 
 function filenameOf(sourceUrl: string): string {
