@@ -4,6 +4,7 @@ import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import { checkNodeVersion, checkPayloadInstalled, type CheckResult } from '../doctor/checks.js'
 import { RestError, RestExtractor } from '../extractors/rest/index.js'
+import { clean } from '../report/summary.js'
 import { formatLine } from '../ui/output.js'
 
 export interface DoctorOptions {
@@ -29,7 +30,8 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
       .map(([kind, n]) => `${n} ${kind}`)
       .join(', ')
     const results: CheckResult[] = [
-      { status: 'ok', title: `WordPress at ${info.siteUrl}`, detail: `${counts || 'no counts available'}\nSEO plugin: ${info.seoPlugin ?? 'none detected'}` },
+      // siteUrl comes from the site itself: a hacked site must not reach the terminal raw.
+      { status: 'ok', title: `WordPress at ${clean(info.siteUrl)}`, detail: `${counts || 'no counts available'}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
     ]
     if (source.auth) {
       // Doc 12.8: least privilege, and the credential should not outlive the migration.
