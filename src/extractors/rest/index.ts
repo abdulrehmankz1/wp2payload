@@ -253,7 +253,8 @@ function mapDocument(p: Json, type: 'post' | 'page'): IRDocument {
   const ids = (v: unknown): number[] => (Array.isArray(v) ? v.filter((n): n is number => typeof n === 'number') : [])
   const doc: IRDocument = {
     wpId: num(p.id) ?? 0,
-    type: str(p.type) ?? type,
+    // The endpoint decides the type: an item from /posts claiming type "page" must not overwrite a page.
+    type,
     status,
     slug: str(p.slug) ?? '',
     title: toPlainText(nested(p.title, 'raw') ?? nested(p.title, 'rendered') ?? ''),
