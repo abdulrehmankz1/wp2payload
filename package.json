@@ -1,12 +1,12 @@
 {
   "name": "wp2payload",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Migrate WordPress sites into Payload CMS: posts, pages, media, SEO and redirects.",
   "license": "MIT",
   "author": "Abdul Rehman (https://github.com/abdulrehmankz1)",
   "type": "module",
   "bin": {
-    "wp2payload": "./dist/cli.js"
+    "wp2payload": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -60,6 +60,11 @@
   },
   "peerDependencies": {
     "payload": "^3.92.0"
+  },
+  "peerDependenciesMeta": {
+    "payload": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@payloadcms/db-sqlite": "3.92.1",
