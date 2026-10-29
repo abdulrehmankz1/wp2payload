@@ -115,9 +115,14 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
     lines.push(` ${clean(phase).padEnd(width)}${parts.length ? parts.join(', ') : 'nothing to do'}`)
   }
   if (phases.length === 0) lines.push(' No items processed.')
-  if (json.redirects) {
+  // The redirects phase row already shows its counts; this row is for reports built without one.
+  if (json.redirects && !json.summary['redirects']) {
     const conflicts = json.redirects.conflicts ? `, ${plural(json.redirects.conflicts, 'conflict')}` : ''
     lines.push(` ${'redirects'.padEnd(width)}${json.redirects.count}${conflicts}`)
+  }
+  if (json.redirects?.file && !json.dryRun) {
+    // Generated from source data and kept in the ignored folder on purpose: a person reviews it first.
+    lines.push('', `Redirects for next.config: ${clean(json.redirects.file)}. Review it, then copy it into your project (see the README).`)
   }
   lines.push('')
 

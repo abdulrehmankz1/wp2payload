@@ -19,6 +19,23 @@ const program = new Command()
   .version(version, '-v, --version')
 
 program
+  .command('init')
+  .description('Write wp2payload.config.ts and update .gitignore; --scaffold adds the blog preset collections')
+  .option('--url <url>', 'WordPress site URL (written to .env as WP_URL)')
+  .option('--scaffold', 'write the blog preset collections as new files')
+  .option('--force', 'replace an existing wp2payload.config.ts (collection files are never overwritten)')
+  .option('--yes', 'do not ask questions; use the flags')
+  .action(async (opts: { url?: string; scaffold?: boolean; force?: boolean; yes?: boolean }) => {
+    const { runInit } = await import('./commands/init.js')
+    process.exitCode = await runInit({
+      ...(opts.url ? { url: opts.url } : {}),
+      scaffold: opts.scaffold === true,
+      force: opts.force === true,
+      yes: opts.yes === true,
+    })
+  })
+
+program
   .command('doctor')
   .description('Check Node, the Payload project and the WordPress source, without writing anything')
   .option('--config <path>', 'config file location (default: wp2payload.config.ts)')

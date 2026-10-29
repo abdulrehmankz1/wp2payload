@@ -140,7 +140,7 @@ describe('loadDocuments', () => {
         authorWpId: 7,
         termWpIds: [11, 12, 21, 999],
         featuredMediaWpId: 50,
-        seo: { title: 'SEO title', description: 'SEO desc', canonical: `${ORIGIN}/first/`, ogImageWpId: 50 },
+        seo: { title: 'SEO title', description: 'SEO desc', canonical: 'https://syndicated.test/first/', ogImageWpId: 50 },
       }),
       doc(2, 'post', 'draft-one', { status: 'draft' }),
       doc(3, 'page', 'child', { parentWpId: 4, termWpIds: [11] }),

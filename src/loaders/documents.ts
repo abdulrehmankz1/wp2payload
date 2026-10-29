@@ -403,18 +403,48 @@ class Mapper {
     await relate('categories', 'category', collections.category, cats)
     await relate('tags', 'post_tag', collections.post_tag, tags)
 
-    if (out.seo) Object.assign(data, await this.seo(out.seo))
+    if (out.seo) Object.assign(data, await this.seo(out.seo, doc))
     if (this.shape.drafts) data['_status'] = statusOf(doc)
+    else if (doc.status !== 'publish') {
+      // Without drafts every document is live: say so once instead of publishing drafts silently.
+      this.once(`status:${this.shape.slug}`, {
+        code: 'STATUS_NOT_KEPT',
+        detail: `Collection "${this.shape.slug}" has no drafts; ${doc.status} WordPress content is written as live documents. Enable versions.drafts to keep it unpublished`,
+      })
+    }
     this.reportMissing(doc)
     return data
   }
 
-  private async seo(seo: IRSeo): Promise<Record<string, unknown>> {
+  /**
+   * Yoast always emits the post's own permalink as canonical. Copied as is, every document would
+   * point search engines at the old URL, so only canonicals to other sites are kept.
+   */
+  private offSite(url: string | undefined, doc: IRDocument): string | undefined {
+    if (!url) return undefined
+    const parse = (u: string) => {
+      try {
+        return new URL(u)
+      } catch {
+        return undefined
+      }
+    }
+    const host = (u: URL) => u.hostname.toLowerCase().replace(/^www\./, '')
+    const target = parse(url)
+    const site = parse(this.opts.transform.siteOrigin)
+    if (!target || (target.protocol !== 'https:' && target.protocol !== 'http:')) return undefined
+    if (site && host(target) === host(site)) return undefined
+    // Kept, but listed: an off-site canonical is also a known SEO-hijack trick on hacked sites.
+    this.ctx.report.warning({ code: 'SEO_CANONICAL_OFFSITE', doc: `${doc.type}:${doc.wpId}`, detail: `Canonical points to ${host(target)}; check it is intended` })
+    return target.href
+  }
+
+  private async seo(seo: IRSeo, doc: IRDocument): Promise<Record<string, unknown>> {
     const name = this.target.fields['seo'] ?? this.opts.seoField ?? 'meta'
     const values: [string, TargetField['kind'][], unknown][] = [
       ['title', ['text'], seo.title || undefined],
       ['description', ['text'], seo.description || undefined],
-      ['canonical', ['text'], seo.canonical || undefined],
+      ['canonical', ['text'], this.offSite(seo.canonical, doc)],
       ['noindex', ['checkbox'], seo.noindex],
     ]
     const present = values.filter(([, , v]) => v !== undefined)

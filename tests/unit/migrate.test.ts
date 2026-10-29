@@ -10,7 +10,7 @@ import { MemoryReport } from '../../src/report/types.js'
 
 describe('selectPhases', () => {
   it('runs everything by default', () => {
-    expect([...selectPhases(undefined, ['post']).phases]).toEqual(['media', 'terms', 'authors', 'documents'])
+    expect([...selectPhases(undefined, ['post']).phases]).toEqual(['media', 'terms', 'authors', 'documents', 'redirects'])
   })
   it('accepts phases and plural document types', () => {
     const { phases, types } = selectPhases(['media', 'Posts'], ['post', 'page'])
@@ -19,7 +19,7 @@ describe('selectPhases', () => {
   })
   it('rejects unknown names with the valid list', () => {
     expect(() => selectPhases(['comments'], ['post'])).toThrow(OnlyError)
-    expect(() => selectPhases(['comments'], ['post'])).toThrow(/media, terms, authors, documents, posts/)
+    expect(() => selectPhases(['comments'], ['post'])).toThrow(/media, terms, authors, documents, redirects, posts/)
   })
 })
 
@@ -62,8 +62,8 @@ describe('DocumentSpill', () => {
       let n = 0
       const spill = await DocumentSpill.write(root, src(), () => ++n > 2)
       expect(spill.entries).toEqual([
-        { wpId: 1, type: 'post', link: 'https://x.test/s1/' },
-        { wpId: 2, type: 'post', link: 'https://x.test/s2/' },
+        { wpId: 1, type: 'post', link: 'https://x.test/s1/', slug: 's1' },
+        { wpId: 2, type: 'post', link: 'https://x.test/s2/', slug: 's2' },
       ])
       expect([...spill.authors]).toEqual([10, 20])
       const back: IRDocument[] = []

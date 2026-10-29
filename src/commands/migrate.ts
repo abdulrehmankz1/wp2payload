@@ -151,7 +151,10 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         return 0
       }
     }
-    return await finish(await pipeline(false))
+    const code = await finish(await pipeline(false))
+    // Doc 12.8: the credential should not outlive the migration.
+    if (config.source.auth) log(formatLine('warn', 'Revoke the Application Password when you are done', 'Users → Profile → Application Passwords in WordPress.'))
+    return code
   } catch (error) {
     if (error instanceof StateCorruptError) {
       log(formatLine('fail', 'The state file cannot be read', error.message))
