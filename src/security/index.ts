@@ -15,3 +15,4 @@ export {
 } from './media/download.js'
 export { inspectMedia, checkSvg, scanPdf, slugify, type InspectInput, type InspectOk, type InspectRejected, type InspectResult } from './media/verify.js'
 export { writeQuarantine, safeQuarantineName, type QuarantineItem, type QuarantineKind } from './quarantine.js'
+export { sanitizeContent, toPlainText, countExternalLinks, linkHeavyFinding } from './content/index.js'

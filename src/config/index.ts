@@ -1,3 +1,4 @@
+import type { Env } from './types.js'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createJiti } from 'jiti'
@@ -25,7 +26,7 @@ function formatPath(path: PropertyKey[]): string {
 }
 
 /** Validate an already-loaded config value. `env` is used only to tell env-sourced secrets from literals. */
-export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
+export function resolveConfig(raw: unknown, env: Env = process.env): ResolvedConfig {
   const parsed = configSchema.safeParse(raw)
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `${formatPath(issue.path) || '(config)'}: ${issue.message}`)
@@ -49,7 +50,7 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv = process.env
 export async function loadConfig(
   path?: string,
   cwd: string = process.cwd(),
-  env: NodeJS.ProcessEnv = process.env,
+  env: Env = process.env,
 ): Promise<ResolvedConfig> {
   const file = resolve(cwd, path ?? DEFAULT_CONFIG_FILE)
   if (!existsSync(file)) {

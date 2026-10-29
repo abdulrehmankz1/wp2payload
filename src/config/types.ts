@@ -11,3 +11,6 @@ export interface Transformer {
   match: (block: Block) => boolean
   toHtml: (block: Block) => string
 }
+
+// Plain env record. Payload types pull in next, whose NodeJS.ProcessEnv requires NODE_ENV.
+export type Env = Record<string, string | undefined>
