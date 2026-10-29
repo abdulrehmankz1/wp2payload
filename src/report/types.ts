@@ -31,6 +31,24 @@ export interface ReportSink {
   finding(finding: SecurityFinding): void
 }
 
+/** `.wp2payload/report.json` (doc 4.9). PII-free: no emails, no passwords, no tokens. */
+export interface ReportJson {
+  version: 1
+  dryRun: boolean
+  /** siteKey() of the source. */
+  site: string
+  startedAt: string
+  durationSec: number
+  /** Counts per phase (media, terms, authors, documents...). */
+  summary: Record<string, Partial<Record<CountAction, number>>>
+  warnings: Issue[]
+  errors: Issue[]
+  redirects?: { count: number; conflicts: number }
+  security: { summary: Record<Severity, number>; findings: SecurityFinding[] }
+  /** Set when the run stopped early (error-rate threshold, fatal error). */
+  stopped?: { phase: string; reason: string }
+}
+
 /** In-memory sink for tests and for building report.json. */
 export class MemoryReport implements ReportSink {
   readonly summary: Record<string, Partial<Record<CountAction, number>>> = {}
