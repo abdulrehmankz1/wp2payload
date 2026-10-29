@@ -64,6 +64,10 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated |
 | `MEDIA_NOT_MIGRATED` | An image in content points at media that was not migrated |
 | `CONTENT_DROPPED` | Content that could not be converted at all |
+| `DOC_TYPE_UNMAPPED` | A WordPress post type with no entry in `collections`, listed once per type |
+| `FIELD_NOT_IN_TARGET` | WordPress has data for a mapped field the target collection lacks, or has with the wrong type; listed once per collection and field |
+| `TITLE_EMPTY` | The WordPress title was empty; the document was written as "(no title)" |
+| `REFERENCE_NOT_MIGRATED` | A document's author, terms or featured image were not migrated; written without them |
 | `MEDIA_SOURCE_HOST_EXCEPTION` | Media was fetched from the source host over a local or private address |
 | `TERM_PARENT_MISSING` | A category's parent was not found; imported without a parent |
 | `TERM_PARENT_CYCLE` | Categories whose parents form a loop; imported without parents |
@@ -79,6 +83,8 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `MEDIA_LOCAL_UNSUPPORTED` | Local media files arrive with SQL mode (v1.2) |
 | `MEDIA_WRITE_FAILED` | Payload rejected the media upload |
 | `TERM_WRITE_FAILED`, `AUTHOR_WRITE_FAILED` | Payload rejected the write after retries |
+| `RUN_FAILED` | The run stopped on an error outside a single item (source or database unreachable); progress is kept |
+| `DOC_WRITE_FAILED` | A document could not be transformed or written, or its relationship pass failed; the detail names the stage |
 | `REST_AUTH`, `REST_AUTH_REQUIRED` | WordPress rejected or required the Application Password |
 | `REST_NOT_FOUND`, `REST_NOT_JSON`, `REST_HTTP` | The REST API is missing or answered unexpectedly |
 | `REST_NETWORK`, `REST_DNS_FAILED`, `REST_TIMEOUT` | The site could not be reached |

@@ -15,6 +15,8 @@ export interface MediaLoaderOptions {
   reencode?: boolean
   maxFileSizeMB?: number
   concurrency?: number
+  /** Checked before each item: Ctrl+C or the error-rate stop (doc 2.8). */
+  shouldStop?: () => boolean
   retry?: RetryOptions
   // Injected in tests; defaults to the guarded downloader.
   download?: (url: string) => Promise<DownloadResult>
@@ -137,7 +139,7 @@ export async function loadMedia(
     }
   }
 
-  await pool(media, opts.concurrency ?? 4, one)
+  await pool(media, opts.concurrency ?? 4, one, opts.shouldStop)
 }
 
 function describe(m: IRMedia): Record<string, unknown> {
@@ -162,9 +164,15 @@ async function findBySha(ctx: LoaderContext, sha256: string): Promise<PayloadId 
 }
 
 // Bounded concurrency without buffering the whole source (doc 1.7: memory stays flat).
-async function pool<T>(items: AsyncIterable<T> | Iterable<T>, size: number, run: (item: T) => Promise<void>): Promise<void> {
+async function pool<T>(
+  items: AsyncIterable<T> | Iterable<T>,
+  size: number,
+  run: (item: T) => Promise<void>,
+  stop?: () => boolean,
+): Promise<void> {
   const active = new Set<Promise<void>>()
   for await (const item of items) {
+    if (stop?.()) break
     const p: Promise<void> = run(item).finally(() => active.delete(p))
     active.add(p)
     if (active.size >= size) await Promise.race(active)

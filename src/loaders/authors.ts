@@ -15,15 +15,17 @@ const PHASE = 'authors'
 export async function loadAuthors(
   ctx: LoaderContext,
   authors: AsyncIterable<IRAuthor> | Iterable<IRAuthor>,
-  opts: { include?: Set<number>; retry?: RetryOptions } = {},
+  opts: { include?: Set<number>; retry?: RetryOptions; shouldStop?: () => boolean } = {},
 ): Promise<void> {
+  const collection = ctx.collections.author
+  if (collection === undefined) return
   for await (const a of authors) {
+    if (opts.shouldStop?.()) return
     if (opts.include && !opts.include.has(a.wpId)) {
       ctx.report.count(PHASE, 'skipped')
       ctx.report.warning({ code: 'AUTHOR_NOT_MIGRATED', detail: `User ${a.wpId} is not in the include list and was not migrated`, doc: `author:${a.wpId}` })
       continue
     }
-    const collection = ctx.collections.author
     try {
       if (ctx.dryRun) {
         const existing = await resolve(ctx, 'author', collection, a.wpId)

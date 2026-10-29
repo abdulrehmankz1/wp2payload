@@ -76,7 +76,7 @@ export function orderCategories(cats: IRTerm[]): {
 export async function loadTerms(
   ctx: LoaderContext,
   terms: AsyncIterable<IRTerm> | Iterable<IRTerm>,
-  opts: { retry?: RetryOptions } = {},
+  opts: { retry?: RetryOptions; shouldStop?: () => boolean } = {},
 ): Promise<void> {
   const all = await collect(terms)
   const cats = new Map<number, IRTerm>()
@@ -100,6 +100,10 @@ export async function loadTerms(
 
   const write = async (kind: 'category' | 'post_tag', t: IRTerm, parentId?: PayloadId): Promise<void> => {
     const collection = ctx.collections[kind]
+    if (collection === undefined) {
+      ctx.report.count(PHASE, 'skipped')
+      return
+    }
     const data: Record<string, unknown> = { name: t.name, slug: t.slug }
     if (kind === 'category') {
       if (t.description !== undefined) data['description'] = t.description
@@ -121,6 +125,7 @@ export async function loadTerms(
   }
 
   for (const t of ordered) {
+    if (opts.shouldStop?.()) return
     const pw = parentOf.get(t.wpId)
     let parentId: PayloadId | undefined
     if (pw !== undefined) {
@@ -131,5 +136,8 @@ export async function loadTerms(
     }
     await write('category', t, parentId)
   }
-  for (const t of tags.values()) await write('post_tag', t)
+  for (const t of tags.values()) {
+    if (opts.shouldStop?.()) return
+    await write('post_tag', t)
+  }
 }

@@ -117,6 +117,13 @@ export class StateStore implements IdMap {
     this.dirty = true
   }
 
+  /** Forget cached IDs and progress, e.g. when the database no longer holds what the cache says. */
+  clear(): void {
+    this.data.idMap = {}
+    this.data.phases = {}
+    this.dirty = true
+  }
+
   // Phases
   phase(name: string): PhaseState {
     return this.data.phases[name] ?? { status: 'pending', processed: 0 }
@@ -154,7 +161,7 @@ export class StateStore implements IdMap {
   }
 }
 
-async function renameWithFallback(from: string, to: string): Promise<void> {
+export async function renameWithFallback(from: string, to: string): Promise<void> {
   let last: unknown
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
