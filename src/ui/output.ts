@@ -1,3 +1,5 @@
+import type { Env } from '../config/types.js'
+
 // Terminal output rules from the brand guide (Section 8.5): standard ANSI colours only,
 // respect NO_COLOR, and no colour when the output is not a TTY (CI logs).
 
@@ -8,7 +10,7 @@ const COLORS: Record<Status, number> = { ok: 32, warn: 33, fail: 31 }
 
 export function colorEnabled(
   stream: { isTTY?: boolean } = process.stdout,
-  env: NodeJS.ProcessEnv = process.env,
+  env: Env = process.env,
 ): boolean {
   // https://no-color.org: any non-empty value disables colour.
   if (env.NO_COLOR) return false

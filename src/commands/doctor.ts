@@ -1,3 +1,4 @@
+import type { Env } from '../config/types.js'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
@@ -8,7 +9,7 @@ import { formatLine } from '../ui/output.js'
 export interface DoctorOptions {
   cwd?: string
   configPath?: string
-  env?: NodeJS.ProcessEnv
+  env?: Env
   log?: (line: string) => void
   // Injected in tests so the source check needs no network.
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe'>
