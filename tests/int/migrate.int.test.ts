@@ -187,6 +187,25 @@ describe('runPipeline', () => {
     expect(JSON.stringify(page)).toContain('"linkType":"internal"')
   })
 
+  it('writes redirects for every migrated document, and --only redirects rebuilds them in full', async () => {
+    const origin = 'https://redir.test'
+    const docs = [
+      doc(origin, 100, 'post', { link: `${origin}/2021/04/hello/`, slug: 'hello' }),
+      doc(origin, 101, 'post', { link: `${origin}/2021/04/world/`, slug: 'world' }),
+    ]
+    const { run } = setup(origin, docs)
+    const file = path.join(root, '.wp2payload', 'redirects.json')
+    const first = await run()
+    expect(first.redirects).toEqual({ count: 2, conflicts: 0, file: '.wp2payload/redirects.json' })
+    const all = JSON.parse(await readFile(file, 'utf8')) as { destination: string }[]
+    expect(all.map((r) => r.destination).sort()).toEqual(['/posts/hello', '/posts/world'])
+
+    // No documents are written here, yet the file keeps every redirect.
+    const rebuilt = await run({ only: ['redirects'] })
+    expect(Object.keys(rebuilt.summary)).toEqual(['redirects'])
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(all)
+  })
+
   it('--only limits phases and document types', async () => {
     const origin = 'https://three.test'
     const docs = [doc(origin, 100, 'post'), doc(origin, 200, 'page')]

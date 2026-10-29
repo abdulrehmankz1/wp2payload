@@ -25,6 +25,24 @@ export interface DocumentWritten {
   externalLinks: number
 }
 
+/** A migrated document whose old permalink should redirect to its new home (doc 2.7). */
+export interface RedirectSource {
+  type: string
+  wpId: number
+  /** Original WordPress permalink. */
+  link: string
+  slug: string
+  collection: CollectionSlug
+  id: PayloadId
+}
+
+export interface RedirectsResult {
+  count: number
+  conflicts: number
+  /** Written when no redirects collection exists: path relative to the project root. */
+  file?: string
+}
+
 export interface LoaderContext {
   payload: Payload
   site: string // siteKey() of the source

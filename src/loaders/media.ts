@@ -69,9 +69,9 @@ export async function loadMedia(
         return
       }
       if (m.localPath) {
-        // SQL-dump mode reads from the uploads folder inside its sandbox (v1.2).
+        // SQL-dump mode reads from the uploads folder inside its sandbox (v1.1).
         ctx.report.count(PHASE, 'errors')
-        ctx.report.error({ code: 'MEDIA_LOCAL_UNSUPPORTED', media: m.wpId, detail: 'Local media files are supported from v1.2' })
+        ctx.report.error({ code: 'MEDIA_LOCAL_UNSUPPORTED', media: m.wpId, detail: 'Local media files are supported from v1.1, with the SQL backup source' })
         return
       }
 

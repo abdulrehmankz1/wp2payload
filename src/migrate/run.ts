@@ -5,16 +5,17 @@ import type { Extractor, IRDocument, IRMedia, IRTerm } from '../ir/types.js'
 import { loadAuthors } from '../loaders/authors.js'
 import { loadDocuments } from '../loaders/documents.js'
 import { loadMedia } from '../loaders/media.js'
+import { loadRedirects } from '../loaders/redirects.js'
 import { loadTerms } from '../loaders/terms.js'
-import type { DocumentTarget, LoaderContext } from '../loaders/types.js'
+import type { DocumentTarget, LoaderContext, RedirectSource } from '../loaders/types.js'
 import { buildReport } from '../report/build.js'
 import { MemoryReport, type ReportJson } from '../report/types.js'
-import { StateStore } from '../state/store.js'
+import { resolve, StateStore } from '../state/store.js'
 import { errorRateExceeded, flagLinkHeavy } from './guards.js'
 import { DocumentSpill, spillPath } from './spill.js'
 import { ensureWorkDir } from './workdir.js'
 
-export const PHASES = ['media', 'terms', 'authors', 'documents'] as const
+export const PHASES = ['media', 'terms', 'authors', 'documents', 'redirects'] as const
 export type Phase = (typeof PHASES)[number]
 
 // Collection keys that are not document types (doc 4.6).
@@ -97,6 +98,9 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
 
   let spill: DocumentSpill | undefined
   const links = new Map<string, number>()
+  // Documents planned in a dry run (they have no Payload ID yet).
+  const planned = new Set<string>()
+  let redirects: ReportJson['redirects']
   try {
     // Every document is extracted, even with --only or --limit: the URL resolver needs every
     // permalink, or a targeted run would turn correct internal links back into old-site URLs.
@@ -109,10 +113,11 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     }
     const authorsWithContent = spill.authors
 
-    const run = async (phase: Phase, mapped: boolean, body: () => Promise<number | undefined>) => {
+    // `enabled` false or a string: the phase is off, and the string says why.
+    const run = async (phase: Phase, enabled: boolean | string, body: () => Promise<number | undefined>) => {
       if (shouldStop()) return
-      if (!phases.has(phase) || !mapped) {
-        o.onPhase?.(phase, 'skip', mapped ? 'not selected' : 'not mapped in collections')
+      if (!phases.has(phase) || enabled !== true) {
+        o.onPhase?.(phase, 'skip', enabled === true ? 'not selected' : enabled || 'not mapped in collections')
         return
       }
       current = phase
@@ -168,13 +173,45 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
         seoField: o.config.seo.field,
         ...(kinds.media ? { mediaCollection: kinds.media } : {}),
         onDocument: (r) => {
-          if (r.action !== 'errors' && r.action !== 'skipped') links.set(`${r.type}:${r.wpId}`, r.externalLinks)
+          if (r.action !== 'errors' && r.action !== 'skipped') {
+            links.set(`${r.type}:${r.wpId}`, r.externalLinks)
+            planned.add(`${r.type}:${r.wpId}`)
+          }
           state.updatePhase('documents', { processed: ++processed })
           if (!o.dryRun) void state.flushIfDue()
         },
         shouldStop,
       })
       return processed
+    })
+
+    // Doc 2.3 step 6, after every document has its Payload ID.
+    await run('redirects', o.config.redirects.enabled || 'redirects.enabled is false', async () => {
+      // Every migrated document of the site with a Payload ID, not only this run's: redirects.json is rewritten in
+      // full, and `--only redirects` regenerates it from what the database holds.
+      const sources: RedirectSource[] = []
+      for (const e of spill!.entries) {
+        const key = `${e.type}:${e.wpId}`
+        const target = Object.hasOwn(targets, e.type) ? targets[e.type] : undefined
+        // A document that failed this run but exists from an earlier one keeps its redirect.
+        if (!target) continue
+        // A dry run has no IDs for new documents; the loader writes nothing then, so any value counts.
+        const id = (await resolve(ctx, e.type, target.collection, e.wpId)) ?? (o.dryRun && planned.has(key) ? DRY_RUN_ID : undefined)
+        if (id !== undefined) sources.push({ ...e, collection: target.collection, id })
+      }
+      const r = o.config.redirects
+      const routes = o.payload.config.routes as { admin?: string; api?: string } | undefined
+      const result = await loadRedirects(ctx, sources, {
+        siteUrl: sourceUrl(o.config),
+        paths: r.paths,
+        collection: r.collection as CollectionSlug,
+        root: o.root,
+        // Payload's own routes must never be shadowed by a hostile permalink.
+        reserved: [routes?.admin, routes?.api].filter((p): p is string => typeof p === 'string' && p.startsWith('/')),
+        shouldStop,
+      })
+      redirects = { count: result.count, conflicts: result.conflicts, ...(result.file ? { file: result.file } : {}) }
+      return sources.length
     })
   } catch (error) {
     // Source or database failures outside per-item handling: keep what was done, report why.
@@ -195,8 +232,11 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     startedAt,
     finishedAt: new Date(),
     ...(stopped ? { stopped } : {}),
+    ...(redirects ? { redirects } : {}),
   })
 }
+
+const DRY_RUN_ID = 'dry-run'
 
 /** IR document types the config maps (everything in `collections` except media, terms and authors). */
 export function documentTypes(config: ResolvedConfig): string[] {

@@ -15,6 +15,7 @@ export interface SpillEntry {
   wpId: number
   type: string
   link: string
+  slug: string
 }
 
 /**
@@ -40,7 +41,7 @@ export class DocumentSpill {
       for await (const doc of docs) {
         if (stop?.()) break
         if (!out.write(`${JSON.stringify(doc)}\n`)) await once(out, 'drain')
-        spill.entries.push({ wpId: doc.wpId, type: doc.type, link: doc.link })
+        spill.entries.push({ wpId: doc.wpId, type: doc.type, link: doc.link, slug: doc.slug })
         if (doc.authorWpId !== undefined) spill.authors.add(doc.authorWpId)
       }
     } finally {

@@ -102,6 +102,25 @@ describe('runMigrate', () => {
     expect(await runMigrate(harness([unknown], { yes: true, strict: true }).opts)).toBe(3)
   })
 
+  it('reminds to revoke the Application Password after a real run with auth', async () => {
+    const authed = await mkdtemp(path.join(os.tmpdir(), 'wp2p-cmd-auth-'))
+    try {
+      await writeFile(
+        path.join(authed, 'wp2payload.config.ts'),
+        `export default { source: { type: 'rest', url: 'https://auth.test', auth: { user: process.env.T_USER, appPassword: process.env.T_PASS } }, collections: { post: { to: 'posts' }, media: { to: 'media' } } }\n`,
+      )
+      process.env['T_USER'] = 'editor'
+      process.env['T_PASS'] = 'not-a-real-password'
+      const h = harness([post(1)], { cwd: authed, yes: true, env: { NO_COLOR: '1', T_USER: 'editor', T_PASS: 'not-a-real-password' } })
+      expect(await runMigrate(h.opts)).toBe(0)
+      expect(h.lines.join('\n')).toMatch(/Revoke the Application Password/)
+    } finally {
+      delete process.env['T_USER']
+      delete process.env['T_PASS']
+      await rm(authed, { recursive: true, force: true })
+    }
+  })
+
   it('rejects an unknown --only value with exit 2 before connecting', async () => {
     const h = harness([post(1)], { only: ['comments'] })
     expect(await runMigrate(h.opts)).toBe(2)

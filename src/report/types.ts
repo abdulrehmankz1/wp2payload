@@ -43,7 +43,8 @@ export interface ReportJson {
   summary: Record<string, Partial<Record<CountAction, number>>>
   warnings: Issue[]
   errors: Issue[]
-  redirects?: { count: number; conflicts: number }
+  /** `file` is set when redirects.json was written instead of a redirects collection. */
+  redirects?: { count: number; conflicts: number; file?: string }
   security: { summary: Record<Severity, number>; findings: SecurityFinding[] }
   /** Set when the run stopped early (error-rate threshold, fatal error). */
   stopped?: { phase: string; reason: string }

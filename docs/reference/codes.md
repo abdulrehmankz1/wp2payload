@@ -53,6 +53,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `DYNAMIC_BLOCK_SKIPPED` | Server-rendered blocks (query loops, navigation, search...) with no stored content, listed once per document |
 | `REUSABLE_BLOCK_SKIPPED` | A reusable block; its content lives in a separate post that is not migrated yet |
 | `QUARANTINE_LIMIT` | More than 50 fragments were removed from one document; the rest are reported but not saved |
+| `SEO_CANONICAL_OFFSITE` | The SEO canonical points to another site; kept, listed for review (canonicals to the old site are dropped, since the new site is canonical now) |
 | `SEO_CANONICAL_INVALID` | The SEO canonical URL was not http(s) and was dropped |
 | `TRANSFORMER_FAILED` | A custom transformer threw; the built-in rule was used instead |
 | `BLOCK_ATTRS_INVALID` | A block comment had attributes that are not valid JSON |
@@ -66,9 +67,12 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `CONTENT_DROPPED` | Content that could not be converted at all |
 | `DOC_TYPE_UNMAPPED` | A WordPress post type with no entry in `collections`, listed once per type |
 | `FIELD_NOT_IN_TARGET` | WordPress has data for a mapped field the target collection lacks, or has with the wrong type; listed once per collection and field |
+| `STATUS_NOT_KEPT` | Draft, private or scheduled content went into a collection without drafts, so it is live; listed once per collection |
 | `TITLE_EMPTY` | The WordPress title was empty; the document was written as "(no title)" |
 | `REFERENCE_NOT_MIGRATED` | A document's author, terms or featured image were not migrated; written without them |
 | `MEDIA_SOURCE_HOST_EXCEPTION` | Media was fetched from the source host over a local or private address |
+| `REDIRECT_SKIPPED` | A document got no redirect: its old link is off-site or empty, it is the front page, its old or new path is reserved (admin, API, `/_next`, listing routes), its slug is empty or has a dot segment, or there is no `redirects.paths` pattern for its type |
+| `REDIRECT_COLLECTION_UNSUPPORTED` | The `redirects.collection` exists but lacks the plugin's `from` and `to` fields; redirects.json was written instead |
 | `TERM_PARENT_MISSING` | A category's parent was not found; imported without a parent |
 | `TERM_PARENT_CYCLE` | Categories whose parents form a loop; imported without parents |
 | `TERM_TAXONOMY_UNSUPPORTED` | A taxonomy other than categories and tags |
@@ -80,9 +84,11 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | --- | --- |
 | `MEDIA_404` and other `MEDIA_<status>` | The media URL answered with an HTTP error |
 | `MEDIA_NETWORK`, `MEDIA_DNS_FAILED`, `MEDIA_TIMEOUT`, `MEDIA_BAD_URL` | The media file could not be fetched |
-| `MEDIA_LOCAL_UNSUPPORTED` | Local media files arrive with SQL mode (v1.2) |
+| `MEDIA_LOCAL_UNSUPPORTED` | Local media files arrive with the SQL backup source (v1.1) |
 | `MEDIA_WRITE_FAILED` | Payload rejected the media upload |
 | `TERM_WRITE_FAILED`, `AUTHOR_WRITE_FAILED` | Payload rejected the write after retries |
+| `REDIRECT_CONFLICT` | Two documents claim the same old URL or the same new path, an old URL equals another document's new path (it would hide that document), or an existing redirect points to another document. The first is kept, nothing is changed, and the phase counts it as `rejected`. A redirect whose document was deleted is repointed instead |
+| `REDIRECT_WRITE_FAILED` | A redirect, or redirects.json, could not be written |
 | `RUN_FAILED` | The run stopped on an error outside a single item (source or database unreachable); progress is kept |
 | `DOC_WRITE_FAILED` | A document could not be transformed or written, or its relationship pass failed; the detail names the stage |
 | `REST_AUTH`, `REST_AUTH_REQUIRED` | WordPress rejected or required the Application Password |

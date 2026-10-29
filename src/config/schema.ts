@@ -1,7 +1,8 @@
 import { z } from 'zod'
 import type { Block, Transformer } from './types.js'
 
-const httpUrl = z.string().refine(
+// Usually read from WP_URL; say so, because an unset variable arrives here as undefined.
+const httpUrl = z.string({ error: 'expected the WordPress site URL (is WP_URL set in .env?)' }).refine(
   (value) => {
     try {
       const { protocol } = new URL(value)
@@ -20,7 +21,7 @@ const restSource = z.strictObject({
   type: z.literal('rest'),
   url: httpUrl,
   auth: z
-    .strictObject({ user: nonEmpty('a WordPress username'), appPassword: nonEmpty('an application password') })
+    .strictObject({ user: nonEmpty('a WordPress username (is WP_USER set?)'), appPassword: nonEmpty('an application password') })
     .optional(),
 })
 
@@ -55,6 +56,9 @@ const BLOG_PRESET = {
   author: { to: 'authors' },
 }
 
+// Routes of the Payload website template.
+const REDIRECT_PATHS = { post: '/posts/:slug', page: '/:slug' }
+
 const EMBED_HOSTS = ['www.youtube.com', 'www.youtube-nocookie.com', 'player.vimeo.com']
 const QUALITY_MSG = 'expected an integer from 1 to 100'
 
@@ -79,7 +83,15 @@ export const configSchema = z.strictObject({
       field: nonEmpty('a Payload field name').default('meta'),
     })
     .default({ plugin: 'auto', field: 'meta' }),
-  redirects: z.strictObject({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  redirects: z
+    .strictObject({
+      enabled: z.boolean().default(true),
+      // @payloadcms/plugin-redirects collection; used when the Payload config has it.
+      collection: nonEmpty('a Payload collection slug').default('redirects'),
+      // New URL per WordPress type when writing redirects.json (the plugin links documents instead).
+      paths: z.record(z.string(), z.string().regex(/^\/.*:slug/, 'expected a path containing :slug, e.g. /posts/:slug')).default(REDIRECT_PATHS),
+    })
+    .default({ enabled: true, collection: 'redirects', paths: REDIRECT_PATHS }),
   media: z
     .strictObject({
       allowedHosts: z.array(z.string()).default([]),
