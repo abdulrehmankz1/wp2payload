@@ -1,12 +1,12 @@
 {
   "name": "wp2payload",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Migrate WordPress sites into Payload CMS: posts, pages, media, SEO and redirects.",
   "license": "MIT",
   "author": "Abdul Rehman (https://github.com/abdulrehmankz1)",
   "type": "module",
   "bin": {
-    "wp2payload": "./dist/cli.js"
+    "wp2payload": "dist/cli.js"
   },
   "exports": {
     ".": {
@@ -47,15 +47,30 @@
     "smoke": "node scripts/smoke.mjs",
     "fixture:up": "docker compose up -d",
     "fixture:seed": "node scripts/fixture-seed.mjs",
-    "fixture:down": "docker compose down -v"
+    "fixture:down": "docker compose down -v",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project int"
   },
   "dependencies": {
     "commander": "^15.0.0",
+    "file-type": "^22.2.0",
     "jiti": "^2.7.0",
+    "sharp": "~0.35.5",
     "zod": "^4.6.7"
   },
+  "peerDependencies": {
+    "payload": "^3.92.0"
+  },
+  "peerDependenciesMeta": {
+    "payload": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@payloadcms/db-sqlite": "3.92.1",
     "@types/node": "^22.20.5",
+    "graphql": "^16.14.2",
+    "payload": "3.92.1",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
