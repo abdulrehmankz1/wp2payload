@@ -123,8 +123,12 @@ export class RestClient {
       }
       if (!res.ok) throw this.#httpError(res.status, await wpErrorCode(res))
 
+      const text = await readCapped(res, MAX_BODY_BYTES)
+      if (text === undefined) {
+        throw new RestError('REST_TOO_LARGE', `${url.pathname} on ${this.site.origin} answered with more than ${MAX_BODY_BYTES / 1024 / 1024} MB. Lower the page size or check the site.`)
+      }
       try {
-        return { json: await res.json(), headers: res.headers }
+        return { json: JSON.parse(text), headers: res.headers }
       } catch {
         throw new RestError('REST_NOT_JSON', `${this.site.base}/wp-json did not return JSON. Check the URL points at a WordPress site.`)
       }
@@ -154,13 +158,42 @@ export class RestClient {
   }
 }
 
-const MAX_ERROR_BODY_CHARS = 64 * 1024
+// A REST page of 100 posts with full content is a few MB; anything far beyond is not WordPress.
+const MAX_BODY_BYTES = 64 * 1024 * 1024
+const MAX_ERROR_BODY_BYTES = 64 * 1024
+
+/**
+ * The body as UTF-8 text, or undefined past `max` bytes. Streams and cancels, so a hostile or
+ * endless response never sits in memory whole, whatever Content-Length claims.
+ */
+async function readCapped(res: Response, max: number): Promise<string | undefined> {
+  const declared = Number(res.headers.get('content-length'))
+  if (declared > max) {
+    await res.body?.cancel().catch(() => undefined)
+    return undefined
+  }
+  if (!res.body) return ''
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel().catch(() => undefined)
+      return undefined
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
 
 /** The `code` of a WordPress REST error body, if it is a short identifier. Never echoes other content. */
 async function wpErrorCode(res: Response): Promise<string | undefined> {
   try {
-    const text = await res.text()
-    if (text.length > MAX_ERROR_BODY_CHARS) return undefined
+    const text = await readCapped(res, MAX_ERROR_BODY_BYTES)
+    if (text === undefined) return undefined
     const body: unknown = JSON.parse(text)
     const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined
     return typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code) ? code : undefined

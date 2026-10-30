@@ -95,6 +95,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `DOC_WRITE_FAILED` | A document could not be transformed or written, or its relationship pass failed; the detail names the stage |
 | `REST_AUTH`, `REST_AUTH_REQUIRED` | WordPress rejected or required the Application Password |
 | `REST_NOT_FOUND`, `REST_NOT_JSON`, `REST_HTTP` | The REST API is missing or answered unexpectedly |
+| `REST_TOO_LARGE` | A REST response was over 64 MB and was not read |
 | `REST_NETWORK`, `REST_DNS_FAILED`, `REST_TIMEOUT` | The site could not be reached |
 | `REST_BAD_URL`, `REST_HTTP_NOT_ALLOWED` | The source URL is invalid, or plain http to a public host |
 | `REST_BAD_REDIRECT`, `REST_CROSS_ORIGIN`, `REST_TOO_MANY_REDIRECTS` | Redirects that leave the site or loop |
