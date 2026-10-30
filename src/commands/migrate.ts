@@ -6,6 +6,7 @@ import type { Env } from '../config/types.js'
 import { RestError, RestExtractor } from '../extractors/rest/index.js'
 import type { Extractor, IRDocument } from '../ir/types.js'
 import { siteKey } from '../loaders/wpmeta.js'
+import { DownloadCache } from '../migrate/download-cache.js'
 import { documentTypes, isFirstRun, OnlyError, runPipeline, selectPhases, type Phase } from '../migrate/run.js'
 import { StateCorruptError } from '../state/store.js'
 import { bootPayload } from '../payload/boot.js'
@@ -101,6 +102,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
   }
   process.on('SIGINT', onSigint)
 
+  let downloadCache: DownloadCache | undefined
   try {
     const checks = preflight(booted.payload, config)
     const failed = checks.filter((c) => c.status === 'fail')
@@ -122,6 +124,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         fresh: opts.fresh === true,
         allowSvg: opts.allowSvg === true,
         allowEmbedHosts: opts.allowEmbedHosts ?? [],
+        ...(downloadCache ? { downloadCache } : {}),
         interrupted: () => interrupted,
         onPhase: (phase, status, why) => progress(log, phase, status, why, opts.verbose === true),
       })
@@ -142,6 +145,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         return 1
       }
       log('First run for this site. Previewing with a dry run before writing anything.')
+      downloadCache = await DownloadCache.create(cwd)
       const preview = await pipeline(true)
       const code = await finish(preview)
       if (preview.stopped) return code
@@ -163,6 +167,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     throw error
   } finally {
     process.off('SIGINT', onSigint)
+    await downloadCache?.dispose()
     await booted.close()
   }
 }
