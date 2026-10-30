@@ -106,19 +106,20 @@ describe('transformDocument', () => {
     expect(existsSync(path.join(root, '.wp2payload'))).toBe(false)
   })
 
-  it('converts title, excerpt and SEO fields to plain text (T2)', async () => {
+  it('converts the excerpt to plain text and keeps already-plain title and SEO text as written (T2)', async () => {
     const { ctx } = context()
     const out = await transformDocument(
       doc('<p>x</p>', {
-        title: 'Hi <img src=x onerror=alert(1)>&amp;amp; there',
-        excerpt: '<p>Short <b>summary</b></p>',
-        seo: { title: '<script>x</script>SEO', description: 'A &lt;b&gt;', canonical: `${SITE}/hello/` },
+        // Extractors decode titles and SEO fields: what arrives is text, so `&lt;b&gt;` is literal.
+        title: 'Use &lt;b&gt; tags  today',
+        excerpt: 'Short   summary',
+        seo: { title: 'SEO[31m', description: 'A &lt;b&gt;', canonical: `${SITE}/hello/` },
       }),
       ctx,
     )
-    expect(out.title).toBe('Hi &amp; there')
+    expect(out.title).toBe('Use &lt;b&gt; tags today')
     expect(out.excerpt).toBe('Short summary')
-    expect(out.seo).toMatchObject({ title: 'SEO', description: 'A <b>', canonical: `${SITE}/hello/` })
+    expect(out.seo).toMatchObject({ title: 'SEO[31m', description: 'A &lt;b&gt;', canonical: `${SITE}/hello/` })
   })
 
   it('sanitizes custom transformer output and reports unknown blocks', async () => {

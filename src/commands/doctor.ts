@@ -13,7 +13,7 @@ export interface DoctorOptions {
   env?: Env
   log?: (line: string) => void
   // Injected in tests so the source check needs no network.
-  createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe'>
+  createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
@@ -25,7 +25,8 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
     return [{ status: 'warn', title: `Source type "${source.type}" is not supported yet`, detail: 'Only the REST source works in this version.' }]
   }
   try {
-    const info = await (opts.createExtractor ?? defaultExtractor)(source).probe()
+    const extractor = (opts.createExtractor ?? defaultExtractor)(source)
+    const info = await extractor.probe()
     const counts = Object.entries(info.counts)
       .map(([kind, n]) => `${n} ${kind}`)
       .join(', ')
@@ -33,6 +34,17 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
       // siteUrl comes from the site itself: a hacked site must not reach the terminal raw.
       { status: 'ok', title: `WordPress at ${clean(info.siteUrl)}`, detail: `${counts || 'no counts available'}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
     ]
+    const plugin = config.seo.plugin
+    if (plugin === 'rankmath' || (plugin === 'auto' && info.seoPlugin === 'rankmath')) {
+      // Rank Math SEO is only readable through getHead, which needs its headless setting (spec 07).
+      if ((await extractor.rankMathHeadless()) === 'off') {
+        results.push({
+          status: 'warn',
+          title: 'Rank Math SEO will not be migrated',
+          detail: 'Turn on Rank Math → General Settings → Others → Headless CMS Support, then run doctor again.',
+        })
+      }
+    }
     if (source.auth) {
       // Doc 12.8: least privilege, and the credential should not outlive the migration.
       results.push({

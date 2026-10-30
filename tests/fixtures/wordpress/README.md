@@ -19,6 +19,21 @@ The seed is idempotent: re-running keeps one copy of the content (import is skip
 - Yoast SEO active. Custom `_yoast_wpseo_title` / `_yoast_wpseo_metadesc` set on posts with slugs `markup-html-tags-and-formatting` and `markup-image-alignment`.
 - User `wp2p-editor` (role editor).
 
+## Rank Math instead of Yoast
+
+The seed uses Yoast. To test Rank Math (spec 07), switch the running fixture by hand:
+
+```
+docker compose run --rm -T wpcli wp plugin install seo-by-rank-math
+docker compose run --rm -T wpcli wp plugin deactivate wordpress-seo
+docker compose run --rm -T wpcli wp plugin activate seo-by-rank-math
+docker compose run --rm -T wpcli wp option update rank_math_registration_skip 1
+docker compose run --rm -T wpcli wp option update rank_math_wizard_completed 1
+docker compose run --rm -T wpcli wp eval '$o = (array) get_option("rank-math-options-general", []); $o["headless_support"] = "on"; update_option("rank-math-options-general", $o);'
+```
+
+The `rankmath/v1` REST namespace appears only after the setup wizard is completed or skipped, and `getHead` only with Headless CMS Support on. Switch back with `wp plugin deactivate seo-by-rank-math && wp plugin activate wordpress-seo`. Verified with Rank Math 1.0.280.
+
 ## Pins
 
 | Item | Pin |

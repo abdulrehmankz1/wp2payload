@@ -43,6 +43,8 @@ export interface IRDocument {
   type: 'post' | 'page' | (string & {})
   status: 'publish' | 'draft' | 'private' | 'future'
   slug: string
+  // Short fields (title, excerpt, SEO) are plain text: decoded, markup removed. They can still
+  // contain a literal `<` (a post about HTML), so consumers must escape them.
   title: string
   html: string // raw content, block comments intact
   excerpt?: string
@@ -71,4 +73,6 @@ export interface Extractor {
   terms(): AsyncIterable<IRTerm>
   authors(): AsyncIterable<IRAuthor>
   documents(): AsyncIterable<IRDocument>
+  /** Optional: where non-fatal source problems go (e.g. SEO not readable). The runner sets it per run. */
+  setWarningSink?(sink: ((issue: { code: string; detail: string; doc?: string }) => void) | undefined): void
 }

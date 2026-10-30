@@ -1,8 +1,10 @@
 import { lookup as dnsLookup } from 'node:dns/promises'
 import type { Extractor, IRAuthor, IRDocument, IRMedia, IRSeo, IRTerm, SourceInfo } from '../../ir/types.js'
+import type { Issue } from '../../report/types.js'
 import { RestClient } from './client.js'
 import { toPlainText } from './decode.js'
 import { RestError, type LookupFn } from './net.js'
+import { parseRankMathHead } from './rankmath.js'
 
 export { RestError } from './net.js'
 export { decodeEntities } from './decode.js'
@@ -17,6 +19,24 @@ export interface RestExtractorOptions {
   maxRetries?: number
   perPage?: number
   sleep?: (ms: number) => Promise<void>
+  /** Config `seo.plugin` (doc 4.5). Default 'auto'. */
+  seoPlugin?: SeoPluginOption
+  /** Non-fatal extractor problems (report warnings). Can also be set later with setWarningSink. */
+  onWarning?: WarningSink
+}
+
+export type SeoPluginOption = 'auto' | 'yoast' | 'rankmath' | 'none'
+export type WarningSink = (issue: Issue) => void
+
+const RANKMATH_NS = 'rankmath/v1'
+const RANKMATH_HEAD = '/wp-json/rankmath/v1/getHead'
+const HEADLESS_FIX = 'Turn on Rank Math → General Settings → Others → Headless CMS Support'
+const FAILED_SAMPLE = 5
+
+/** Per documents() run: Rank Math state and failures to report once at the end. */
+interface SeoRun {
+  headlessOff: boolean
+  failed: string[]
 }
 
 type Json = Record<string, unknown>
@@ -40,6 +60,9 @@ export class RestExtractor implements Extractor {
   readonly #c: RestClient
   readonly #statuses: IRDocument['status'][]
   readonly #perPage: number
+  readonly #seoPlugin: SeoPluginOption
+  #onWarning: WarningSink | undefined
+  #namespaces: string[] | undefined
 
   constructor(o: RestExtractorOptions) {
     this.#c = new RestClient({
@@ -53,6 +76,8 @@ export class RestExtractor implements Extractor {
     })
     this.#statuses = o.statuses ?? ['publish']
     this.#perPage = Math.min(Math.max(o.perPage ?? 100, 1), 100)
+    this.#seoPlugin = o.seoPlugin ?? 'auto'
+    this.#onWarning = o.onWarning
     if (!this.#c.authenticated && this.#statuses.some((s) => s !== 'publish')) {
       throw new RestError(
         'REST_AUTH_REQUIRED',
@@ -64,7 +89,8 @@ export class RestExtractor implements Extractor {
   async probe(): Promise<SourceInfo> {
     const root = await this.#c.get('/wp-json/')
     const body = isObj(root.json) ? root.json : {}
-    const namespaces = Array.isArray(body.namespaces) ? body.namespaces : []
+    const namespaces = namespacesOf(body)
+    this.#namespaces = namespaces
     const counts: SourceInfo['counts'] = {}
     const endpoints = [
       ['posts', 'posts'], ['pages', 'pages'], ['media', 'media'],
@@ -85,6 +111,25 @@ export class RestExtractor implements Extractor {
     if (namespaces.includes('yoast/v1')) info.seoPlugin = 'yoast'
     else if (namespaces.includes('rankmath/v1')) info.seoPlugin = 'rankmath'
     return info
+  }
+
+  /** Where warnings go. The runner calls this once its report exists (a report per run). */
+  setWarningSink(sink: WarningSink | undefined): void {
+    this.#onWarning = sink
+  }
+
+  /**
+   * Whether Rank Math's headless API (`getHead`) answers, asked with the site URL itself.
+   * 'off' only when WordPress says the route does not exist; other failures are 'unknown'.
+   */
+  async rankMathHeadless(): Promise<'on' | 'off' | 'unknown'> {
+    try {
+      await this.#c.get(RANKMATH_HEAD, { url: `${this.#c.site.base}/` })
+      return 'on'
+    } catch (e) {
+      if (!(e instanceof RestError)) throw e
+      return isNoRoute(e) ? 'off' : 'unknown'
+    }
   }
 
   async *media(): AsyncIterable<IRMedia> {
@@ -154,21 +199,83 @@ export class RestExtractor implements Extractor {
   async *documents(): AsyncIterable<IRDocument> {
     const query: Record<string, string> = { status: this.#statuses.join(',') }
     if (this.#c.authenticated) query.context = 'edit'
-    for (const [ep, type] of [['posts', 'post'], ['pages', 'page']] as const) {
-      for await (const p of this.#pages(`/wp-json/wp/v2/${ep}`, query)) {
-        const doc = mapDocument(p, type)
-        if (isObj(p.yoast_head_json) && !sameUrl(str(p.yoast_head_json.canonical), doc.link)) {
-          // Yoast fills yoast_head_json in collection responses from one shared query, so every
-          // item can carry another post's SEO. Seen on Yoast 28.8 / WP 6.x. The single-item
-          // endpoint is correct, so re-read it whenever the canonical does not match the post.
-          const single = await this.#c.get(`/wp-json/wp/v2/${ep}/${doc.wpId}`, { ...query, _fields: 'yoast_head_json' })
-          const seo = isObj(single.json) ? mapSeo(single.json.yoast_head_json) : undefined
-          if (seo) doc.seo = seo
-          else delete doc.seo
+    const plugin = this.#seoPlugin
+    const run: SeoRun = { headlessOff: false, failed: [] }
+    // 'auto' decides Rank Math lazily, only once a document without Yoast data shows up.
+    let rankMath: boolean | undefined = plugin === 'rankmath' ? true : plugin === 'auto' ? undefined : false
+    try {
+      for (const [ep, type] of [['posts', 'post'], ['pages', 'page']] as const) {
+        for await (const p of this.#pages(`/wp-json/wp/v2/${ep}`, query)) {
+          const doc = mapDocument(p, type)
+          if ((plugin === 'auto' || plugin === 'yoast') && isObj(p.yoast_head_json)) {
+            const seo = mapSeo(p.yoast_head_json)
+            if (seo) doc.seo = seo
+            if (!sameUrl(str(p.yoast_head_json.canonical), doc.link)) {
+              // Yoast fills yoast_head_json in collection responses from one shared query, so every
+              // item can carry another post's SEO. Seen on Yoast 28.8 / WP 6.x. The single-item
+              // endpoint is correct, so re-read it whenever the canonical does not match the post.
+              const single = await this.#c.get(`/wp-json/wp/v2/${ep}/${doc.wpId}`, { ...query, _fields: 'yoast_head_json' })
+              const fresh = isObj(single.json) ? mapSeo(single.json.yoast_head_json) : undefined
+              if (fresh) doc.seo = fresh
+              else delete doc.seo
+            }
+          } else if (rankMath !== false && !run.headlessOff) {
+            rankMath ??= (await this.#siteNamespaces()).includes(RANKMATH_NS)
+            if (rankMath) {
+              const seo = await this.#rankMathSeo(doc, run)
+              if (seo) doc.seo = seo
+            }
+          }
+          yield doc
         }
-        yield doc
+      }
+    } finally {
+      // Also runs when the consumer stops early (--limit, Ctrl+C), so the count is not lost.
+      const n = run.failed.length
+      if (n > 0) {
+        const sample = run.failed.slice(0, FAILED_SAMPLE).join(', ') + (n > FAILED_SAMPLE ? ', ...' : '')
+        this.#onWarning?.({
+          code: 'SEO_FETCH_FAILED',
+          detail: `Rank Math SEO could not be read for ${n} document${n === 1 ? '' : 's'} (${sample}); migrated without SEO. Check that their permalinks open on the site, then run again.`,
+        })
       }
     }
+  }
+
+  /** One `getHead` call for one document. Never throws a RestError: failures are counted in `run`. */
+  async #rankMathSeo(doc: IRDocument, run: SeoRun): Promise<IRSeo | undefined> {
+    const id = `${doc.type}:${doc.wpId}`
+    if (!doc.link) {
+      run.failed.push(id)
+      return undefined
+    }
+    let json: unknown
+    try {
+      json = (await this.#c.get(RANKMATH_HEAD, { url: doc.link })).json
+    } catch (e) {
+      if (!(e instanceof RestError)) throw e
+      if (isNoRoute(e)) {
+        run.headlessOff = true
+        this.#onWarning?.({
+          code: 'SEO_RANKMATH_HEADLESS_OFF',
+          detail: `Rank Math SEO was not migrated: its headless API is off. ${HEADLESS_FIX}, then run again.`,
+        })
+      } else {
+        run.failed.push(id)
+      }
+      return undefined
+    }
+    const seo = isObj(json) && json.success === true && typeof json.head === 'string' ? parseRankMathHead(json.head) : undefined
+    if (!seo) run.failed.push(id)
+    return seo
+  }
+
+  async #siteNamespaces(): Promise<string[]> {
+    if (this.#namespaces === undefined) {
+      const root = await this.#c.get('/wp-json/')
+      this.#namespaces = namespacesOf(isObj(root.json) ? root.json : {})
+    }
+    return this.#namespaces
   }
 
   /** Stream a collection page by page; never holds more than one page. */
@@ -184,6 +291,12 @@ export class RestExtractor implements Extractor {
     }
   }
 }
+
+function namespacesOf(body: Json): string[] {
+  return Array.isArray(body.namespaces) ? body.namespaces.filter((n): n is string => typeof n === 'string') : []
+}
+
+const isNoRoute = (e: RestError) => e.status === 404 && e.wpCode === 'rest_no_route'
 
 async function* chain(first: IteratorResult<Json>, it: AsyncIterator<Json>): AsyncGenerator<Json> {
   let cur = first
@@ -272,7 +385,5 @@ function mapDocument(p: Json, type: 'post' | 'page'): IRDocument {
   if (media !== undefined) doc.featuredMediaWpId = media
   const parent = pos(p.parent)
   if (parent !== undefined) doc.parentWpId = parent
-  const seo = mapSeo(p.yoast_head_json)
-  if (seo) doc.seo = seo
   return doc
 }

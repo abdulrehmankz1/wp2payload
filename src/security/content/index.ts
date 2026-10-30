@@ -9,7 +9,7 @@ export {
   type LinkHeavyOptions,
   type ScanLimits,
 } from './sanitize.js'
-export { toPlainText } from './text.js'
+export { normalisePlain, toPlainText } from './text.js'
 export {
   CONTENT_POLICY,
   ALLOWED_TAGS,

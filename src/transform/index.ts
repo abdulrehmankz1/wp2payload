@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { Transformer } from '../config/types.js'
 import type { IRDocument, IRSeo } from '../ir/types.js'
 import type { ReportSink, SecurityFinding } from '../report/types.js'
-import { countExternalLinks, sanitizeContent, scanDocument, spamFinding, toPlainText } from '../security/content/index.js'
+import { countExternalLinks, normalisePlain, sanitizeContent, scanDocument, spamFinding, toPlainText } from '../security/content/index.js'
 import { safeQuarantineName, writeQuarantine } from '../security/quarantine.js'
 import { normaliseBlocks, parseBlocks } from './gutenberg/index.js'
 import { htmlToLexical } from './lexical/index.js'
@@ -77,11 +77,11 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
   for (const w of lexical.warnings) warn(w)
 
   const out: TransformedDocument = {
-    title: toPlainText(doc.title),
+    title: normalisePlain(doc.title),
     content: lexical.state,
     externalLinks: countExternalLinks(html, ctx.siteOrigin),
   }
-  if (doc.excerpt !== undefined) out.excerpt = toPlainText(doc.excerpt)
+  if (doc.excerpt !== undefined) out.excerpt = normalisePlain(doc.excerpt)
   if (doc.seo) out.seo = plainSeo(doc.seo, warn)
   return out
 }
@@ -143,8 +143,8 @@ const hasText = (html: string) => /<(img|iframe|video|audio)\b/i.test(html) || t
 
 function plainSeo(seo: IRSeo, warn: (i: { code: string; detail: string }) => void): IRSeo {
   const out: IRSeo = { ...seo }
-  if (seo.title !== undefined) out.title = toPlainText(seo.title)
-  if (seo.description !== undefined) out.description = toPlainText(seo.description)
+  if (seo.title !== undefined) out.title = normalisePlain(seo.title)
+  if (seo.description !== undefined) out.description = normalisePlain(seo.description)
   if (seo.canonical !== undefined && !/^https?:\/\//i.test(seo.canonical.trim())) {
     delete out.canonical
     warn({ code: 'SEO_CANONICAL_INVALID', detail: 'Canonical URL is not http(s) and was dropped' })

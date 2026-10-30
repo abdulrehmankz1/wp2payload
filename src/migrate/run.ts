@@ -52,6 +52,7 @@ export interface PipelineOptions {
 export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   const startedAt = new Date()
   const report = new MemoryReport()
+  o.extractor.setWarningSink?.((issue) => report.warning(issue))
   await ensureWorkDir(o.root)
   const state = await StateStore.open(o.root, o.site)
   // A cache from another database (wiped, or switched) would point relationships at the wrong rows.
