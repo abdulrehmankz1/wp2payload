@@ -34,6 +34,18 @@ const BREAK = new Set([
 const CONTROLS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g
 
 /**
+ * For text that is already plain (IR titles and SEO fields: extractors decode them): removes
+ * control characters and collapses whitespace, and decodes nothing. Decoding again would turn a
+ * literal `&lt;b&gt;` in a title into a tag and strip it.
+ */
+export function normalisePlain(s: string): string {
+  return s.replace(CONTROLS, '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()
+}
+
+// Bidi controls and zero-width characters: invisible, and used to disguise text.
+const INVISIBLE = /[\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g
+
+/**
  * Removes all markup, decodes character references exactly once (`&amp;lt;` becomes `&lt;`),
  * collapses whitespace and trims. The result is text, not HTML: render it escaped.
  */
@@ -62,5 +74,5 @@ export function toPlainText(s: string): string {
     }
     if ('children' in n) for (let i = n.children.length - 1; i >= 0; i--) stack.push(n.children[i]!)
   }
-  return out.replace(CONTROLS, '').replace(/\s+/g, ' ').trim()
+  return out.replace(CONTROLS, '').replace(INVISIBLE, '').replace(/\s+/g, ' ').trim()
 }
