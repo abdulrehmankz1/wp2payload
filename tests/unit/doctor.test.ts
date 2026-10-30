@@ -55,6 +55,7 @@ describe('runDoctor', () => {
         log,
         createExtractor: () => ({
           probe: async () => ({ siteUrl: 'http://localhost:8080', counts: { posts: 12, pages: 3 }, seoPlugin: 'yoast' as const }),
+          rankMathHeadless: async () => { throw new Error('not called for Yoast') },
         }),
       })
       expect(code).toBe(0)
@@ -73,6 +74,7 @@ describe('runDoctor', () => {
       cwd: root,
       log,
       createExtractor: () => ({
+        rankMathHeadless: async () => 'on' as const,
         probe: async () => {
           throw new RestError('REST_AUTH', 'Could not reach https://example.com/wp-json (401 Unauthorized)\nCheck WP_USER and WP_APP_PASSWORD.', 401)
         },
@@ -80,5 +82,58 @@ describe('runDoctor', () => {
     })
     expect(code).toBe(1)
     expect(output()).toMatch(/✖ Could not reach https:\/\/example\.com\/wp-json \(401 Unauthorized\)\n {2}.*Check WP_USER/)
+  })
+
+  describe('Rank Math headless check (spec 07 AC-5)', () => {
+    const fake = (seoPlugin: 'yoast' | 'rankmath' | undefined, headless: 'on' | 'off' | 'unknown') => {
+      const calls = { headless: 0 }
+      return {
+        calls,
+        createExtractor: () => ({
+          probe: async () => ({ siteUrl: 'https://example.com', counts: {}, ...(seoPlugin ? { seoPlugin } : {}) }),
+          rankMathHeadless: async () => {
+            calls.headless++
+            return headless
+          },
+        }),
+      }
+    }
+    const config = (plugin?: string) =>
+      `export default { source: { type: 'rest', url: 'https://example.com' }${plugin ? `, seo: { plugin: '${plugin}' }` : ''} }`
+    const warning = /! Rank Math SEO will not be migrated\n {2}.*Turn on Rank Math → General Settings → Others → Headless CMS Support, then run doctor again\./
+
+    it('warns with the fix when Rank Math is detected and getHead is missing', async () => {
+      await writeConfig(config())
+      const f = fake('rankmath', 'off')
+      expect(await runDoctor({ cwd: root, log, createExtractor: f.createExtractor })).toBe(0)
+      expect(output()).toMatch(warning)
+      expect(f.calls.headless).toBe(1)
+    })
+
+    it('warns when Rank Math is configured even if not detected', async () => {
+      await writeConfig(config('rankmath'))
+      await runDoctor({ cwd: root, log, createExtractor: fake(undefined, 'off').createExtractor })
+      expect(output()).toMatch(warning)
+    })
+
+    it('stays quiet when headless support is on or cannot be determined', async () => {
+      await writeConfig(config())
+      for (const state of ['on', 'unknown'] as const) {
+        lines = []
+        await runDoctor({ cwd: root, log, createExtractor: fake('rankmath', state).createExtractor })
+        expect(output()).not.toMatch(/Rank Math SEO will not be migrated/)
+      }
+    })
+
+    it('does not ask Rank Math when the config picks yoast or none, or Yoast is detected', async () => {
+      for (const [plugin, detected] of [['yoast', 'rankmath'], ['none', 'rankmath'], ['auto', 'yoast']] as const) {
+        await writeConfig(config(plugin))
+        const f = fake(detected, 'off')
+        lines = []
+        await runDoctor({ cwd: root, log, createExtractor: f.createExtractor })
+        expect(f.calls.headless).toBe(0)
+        expect(output()).not.toMatch(/Rank Math SEO/)
+      }
+    })
   })
 })

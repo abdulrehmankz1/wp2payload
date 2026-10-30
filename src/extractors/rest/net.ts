@@ -6,11 +6,14 @@ export type LookupFn = (host: string) => Promise<{ address: string; family: numb
 export class RestError extends Error {
   readonly code: string
   readonly status?: number
-  constructor(code: string, message: string, status?: number) {
+  /** WordPress error code from the response body (e.g. `rest_no_route`), when it sent one. */
+  readonly wpCode?: string
+  constructor(code: string, message: string, status?: number, wpCode?: string) {
     super(message)
     this.name = 'RestError'
     this.code = code
     if (status !== undefined) this.status = status
+    if (wpCode !== undefined) this.wpCode = wpCode
   }
 }
 

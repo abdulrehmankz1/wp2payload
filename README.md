@@ -136,7 +136,7 @@ export default defineConfig({
     media: { to: 'media' },
   },
   statuses: ['publish'],              // add 'draft', 'private' with an Application Password
-  seo: { plugin: 'auto', field: 'meta' },
+  seo: { plugin: 'auto', field: 'meta' },   // 'auto', 'yoast', 'rankmath' or 'none'
   redirects: { enabled: true },
 })
 ```
@@ -223,7 +223,7 @@ deleted is pointed at the migrated document.
 | Media | Your upload collection, deduplicated by content hash, with alt text and caption |
 | Categories (with hierarchy) and tags | Your mapped collections |
 | Authors | Name and slug only, and only users who wrote migrated content |
-| Yoast SEO (Rank Math is detected, mapping planned) | The SEO group (`meta` by default): title, description, image, and canonical and noindex when your group has them |
+| Yoast SEO and Rank Math | The SEO group (`meta` by default): title, description, image, and noindex and off-site canonicals when your group has them. Rank Math needs **Headless CMS Support** turned on (General Settings → Others); `doctor` tells you when it is off |
 | Old URLs | Redirects |
 
 Passwords, roles and capabilities are never migrated. Blocks with no stored content

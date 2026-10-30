@@ -121,7 +121,7 @@ export class RestClient {
       if (res.status === 429 || res.status >= 500) {
         throw new Retryable(this.#httpError(res.status), retryAfter(res.headers.get('retry-after')))
       }
-      if (!res.ok) throw this.#httpError(res.status)
+      if (!res.ok) throw this.#httpError(res.status, await wpErrorCode(res))
 
       try {
         return { json: await res.json(), headers: res.headers }
@@ -131,7 +131,7 @@ export class RestClient {
     }
   }
 
-  #httpError(status: number): RestError {
+  #httpError(status: number, wpCode?: string): RestError {
     const label = `${status} ${STATUS_TEXT[status] ?? 'Error'}`
     const head = `Could not reach ${this.site.base}/wp-json (${label})`
     if (status === 401 || status === 403) {
@@ -139,6 +139,7 @@ export class RestClient {
         'REST_AUTH',
         `${head}\nCheck WP_USER and WP_APP_PASSWORD. Application Passwords are under Users → Profile in WordPress 5.6+.`,
         status,
+        wpCode,
       )
     }
     if (status === 404) {
@@ -146,9 +147,25 @@ export class RestClient {
         'REST_NOT_FOUND',
         `${head}\nThe WordPress REST API is disabled or the URL is wrong. Check the source URL and that /wp-json is not blocked by a plugin or firewall.`,
         status,
+        wpCode,
       )
     }
-    return new RestError('REST_HTTP', `${head}\nThe server rejected the request. Try again later or check the site logs.`, status)
+    return new RestError('REST_HTTP', `${head}\nThe server rejected the request. Try again later or check the site logs.`, status, wpCode)
+  }
+}
+
+const MAX_ERROR_BODY_CHARS = 64 * 1024
+
+/** The `code` of a WordPress REST error body, if it is a short identifier. Never echoes other content. */
+async function wpErrorCode(res: Response): Promise<string | undefined> {
+  try {
+    const text = await res.text()
+    if (text.length > MAX_ERROR_BODY_CHARS) return undefined
+    const body: unknown = JSON.parse(text)
+    const code = typeof body === 'object' && body !== null ? (body as { code?: unknown }).code : undefined
+    return typeof code === 'string' && /^[a-z0-9_]{1,64}$/i.test(code) ? code : undefined
+  } catch {
+    return undefined
   }
 }
 

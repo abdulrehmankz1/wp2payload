@@ -171,7 +171,8 @@ const defaultExtractor = (config: ResolvedConfig): Extractor => {
   if (config.source.type !== 'rest') throw new Error('unreachable: only REST is supported')
   const { url, auth } = config.source
   // The config schema accepts any status string; the extractor maps unknown ones to draft.
-  return new RestExtractor({ url, ...(auth ? { auth } : {}), statuses: config.statuses as IRDocument['status'][] })
+  // Warnings go to the report through setWarningSink, called by the runner once its report exists.
+  return new RestExtractor({ url, ...(auth ? { auth } : {}), statuses: config.statuses as IRDocument['status'][], seoPlugin: config.seo.plugin })
 }
 
 async function ask(question: string): Promise<boolean> {
