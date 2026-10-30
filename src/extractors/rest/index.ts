@@ -2,7 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises'
 import type { Extractor, IRAuthor, IRDocument, IRMedia, IRSeo, IRTerm, SourceInfo } from '../../ir/types.js'
 import type { Issue } from '../../report/types.js'
 import { RestClient } from './client.js'
-import { toPlainText } from './decode.js'
+import { normaliseSlug, toPlainText } from './decode.js'
 import { RestError, type LookupFn } from './net.js'
 import { parseRankMathHead } from './rankmath.js'
 
@@ -157,7 +157,7 @@ export class RestExtractor implements Extractor {
           wpId: num(t.id) ?? 0,
           taxonomy,
           name: toPlainText(str(t.name) ?? ''),
-          slug: str(t.slug) ?? '',
+          slug: normaliseSlug(str(t.slug) ?? ''),
         }
         const parent = pos(t.parent)
         if (parent !== undefined) out.parentWpId = parent
@@ -187,7 +187,7 @@ export class RestExtractor implements Extractor {
     for await (const u of source) {
       const out: IRAuthor = {
         wpId: num(u.id) ?? 0,
-        slug: str(u.slug) ?? '',
+        slug: normaliseSlug(str(u.slug) ?? ''),
         displayName: toPlainText(str(u.name) ?? ''),
       }
       const email = str(u.email)
@@ -369,7 +369,7 @@ function mapDocument(p: Json, type: 'post' | 'page'): IRDocument {
     // The endpoint decides the type: an item from /posts claiming type "page" must not overwrite a page.
     type,
     status,
-    slug: str(p.slug) ?? '',
+    slug: normaliseSlug(str(p.slug) ?? ''),
     title: toPlainText(nested(p.title, 'raw') ?? nested(p.title, 'rendered') ?? ''),
     html,
     link: str(p.link) ?? '',

@@ -11,7 +11,7 @@ permissions:
 jobs:
   test:
     name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -34,7 +34,7 @@ jobs:
   # Section 2.11 "Install": the packed tarball installs and runs in a clean folder
   # without lifecycle scripts, the way users will get it.
   install:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

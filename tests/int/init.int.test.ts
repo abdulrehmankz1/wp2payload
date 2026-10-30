@@ -224,4 +224,39 @@ describe('documents loader against the preset (spec 06 review)', () => {
       expect(blocks).toContain('"rel":"nofollow noopener"')
     }
   })
+
+  it('drops canonicals with credentials or a trailing-dot copy of the old host (S07-04)', async () => {
+    const payload = booted!.payload
+    const site = 'https://oldsite.test'
+    const ids = new Map<string, PayloadId>()
+    const report = new MemoryReport()
+    const ctx: LoaderContext = {
+      payload,
+      site,
+      dryRun: false,
+      ids: { get: (k: IdKind, id) => ids.get(`${k}:${id}`), set: (k, id, v) => void ids.set(`${k}:${id}`, v) },
+      report,
+      collections: { media: 'media' as never },
+    }
+    const docs = [
+      doc(300, 'post', { seo: { title: 'SEO', canonical: 'https://oldsite.test@evil.test/x/' } }),
+      doc(301, 'post', { seo: { title: 'SEO', canonical: 'https://OLDSITE.test./post-301/' } }),
+    ]
+    await loadDocuments(ctx, () => (async function* () { yield* docs })(), {
+      targets: { post: { collection: 'posts' as never, fields: { content: 'content' } } },
+      transform: { siteOrigin: ORIGIN, embedHosts: [], externalLinkRel: 'nofollow noopener', transformers: [], root: dataDir },
+      media: [],
+      documents: docs.map((d) => ({ wpId: d.wpId, type: d.type, link: d.link })),
+      mediaCollection: 'media' as never,
+      retry: { attempts: 1 },
+    })
+
+    expect(report.errors).toEqual([])
+    for (const wpId of [300, 301]) {
+      const found = await payload.find({ collection: 'posts' as never, where: { 'wpMeta.wpId': { equals: wpId } }, draft: true, depth: 0 })
+      expect((found.docs[0] as { meta?: { canonical?: string | null } }).meta?.canonical ?? null).toBeNull()
+    }
+    expect(report.warnings.filter((w) => w.code === 'SEO_CANONICAL_INVALID').map((w) => w.doc)).toEqual(['post:300'])
+    expect(report.warnings.filter((w) => w.code === 'SEO_CANONICAL_OFFSITE')).toEqual([])
+  })
 })

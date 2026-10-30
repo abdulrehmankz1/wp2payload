@@ -20,6 +20,8 @@ export interface MediaLoaderOptions {
   retry?: RetryOptions
   // Injected in tests; defaults to the guarded downloader.
   download?: (url: string) => Promise<DownloadResult>
+  /** Wraps the downloader, e.g. to reuse the first-run preview's downloads. */
+  wrapDownload?: (download: (url: string) => Promise<DownloadResult>) => (url: string) => Promise<DownloadResult>
 }
 
 /**
@@ -34,7 +36,7 @@ export async function loadMedia(
   opts: MediaLoaderOptions,
 ): Promise<void> {
   const source = new URL(opts.sourceUrl)
-  const download =
+  const base =
     opts.download ??
     ((url: string) =>
       safeDownload(url, {
@@ -43,6 +45,7 @@ export async function loadMedia(
         allowedHosts: opts.allowedHosts ?? [],
         maxBytes: (opts.maxFileSizeMB ?? 50) * 1024 * 1024,
       }))
+  const download = opts.wrapDownload ? opts.wrapDownload(base) : base
   let exceptionReported = false
   // Uploads in flight by original hash, so two items with the same bytes in one batch
   // share one document instead of racing past findBySha.

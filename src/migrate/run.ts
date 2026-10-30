@@ -5,6 +5,7 @@ import type { Extractor, IRDocument, IRMedia, IRTerm } from '../ir/types.js'
 import { loadAuthors } from '../loaders/authors.js'
 import { loadDocuments } from '../loaders/documents.js'
 import { loadMedia } from '../loaders/media.js'
+import type { DownloadCache } from './download-cache.js'
 import { loadRedirects } from '../loaders/redirects.js'
 import { loadTerms } from '../loaders/terms.js'
 import type { DocumentTarget, LoaderContext, RedirectSource } from '../loaders/types.js'
@@ -35,6 +36,8 @@ export interface PipelineOptions {
   fresh?: boolean
   allowSvg?: boolean
   allowEmbedHosts?: readonly string[]
+  /** Shared by the first-run preview and the real run, so media is downloaded once. */
+  downloadCache?: DownloadCache
   /** Set by Ctrl+C; checked between items. */
   interrupted?: () => boolean
   onPhase?: (phase: Phase, status: 'start' | 'skip' | 'done', why?: string) => void
@@ -143,6 +146,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
         maxFileSizeMB: m.maxFileSizeMB,
         concurrency: o.concurrency ?? 4,
         shouldStop,
+        ...(o.downloadCache ? { wrapDownload: (d) => o.downloadCache!.wrap(d) } : {}),
       })
       return media.length
     })
