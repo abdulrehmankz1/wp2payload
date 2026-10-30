@@ -1,6 +1,6 @@
 {
   "name": "wp2payload",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Migrate WordPress sites into Payload CMS: posts, pages, media, SEO and redirects.",
   "license": "MIT",
   "author": "Abdul Rehman (https://github.com/abdulrehmankz1)",
