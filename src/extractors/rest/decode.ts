@@ -39,3 +39,22 @@ export function normaliseText(input: string): string {
   // Cc: C0, DEL and C1 controls. Zl/Zp: line and paragraph separators.
   return input.replace(/[\p{Cc}\p{Zl}\p{Zp}]/gu, ' ').replace(BIDI, '').replace(/\s+/g, ' ').trim()
 }
+
+/**
+ * WordPress keeps non-ASCII slugs percent-encoded (`%d8%b3%d9%84`); Payload stores and Next.js
+ * route params compare the decoded form. Decodes once to NFC, drops invisible characters and
+ * turns separators an encoded slug could smuggle in (`%2F`, `?`, `#`, `\`) into hyphens.
+ */
+export function normaliseSlug(raw: string): string {
+  let s = raw
+  try {
+    s = decodeURIComponent(raw)
+  } catch {
+    // Malformed escapes: keep the slug as WordPress sent it.
+  }
+  return s
+    .normalize('NFC')
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}\s]/gu, '')
+    .replace(BIDI, '')
+    .replace(/[/?#\\]/g, '-')
+}

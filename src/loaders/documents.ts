@@ -429,10 +429,16 @@ class Mapper {
         return undefined
       }
     }
-    const host = (u: URL) => u.hostname.toLowerCase().replace(/^www\./, '')
+    // Trailing dot: `site.com.` is the same host as `site.com`.
+    const host = (u: URL) => u.hostname.toLowerCase().replace(/\.$/, '').replace(/^www\./, '')
     const target = parse(url)
     const site = parse(this.opts.transform.siteOrigin)
     if (!target || (target.protocol !== 'https:' && target.protocol !== 'http:')) return undefined
+    if (target.username || target.password) {
+      // `https://site.com@evil.example/` reads as the old site but points elsewhere; never kept.
+      this.ctx.report.warning({ code: 'SEO_CANONICAL_INVALID', doc: `${doc.type}:${doc.wpId}`, detail: 'Canonical URL contains credentials and was dropped' })
+      return undefined
+    }
     if (site && host(target) === host(site)) return undefined
     // Kept, but listed: an off-site canonical is also a known SEO-hijack trick on hacked sites.
     this.ctx.report.warning({ code: 'SEO_CANONICAL_OFFSITE', doc: `${doc.type}:${doc.wpId}`, detail: `Canonical points to ${host(target)}; check it is intended` })

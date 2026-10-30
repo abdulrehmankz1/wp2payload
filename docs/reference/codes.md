@@ -54,7 +54,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `REUSABLE_BLOCK_SKIPPED` | A reusable block; its content lives in a separate post that is not migrated yet |
 | `QUARANTINE_LIMIT` | More than 50 fragments were removed from one document; the rest are reported but not saved |
 | `SEO_CANONICAL_OFFSITE` | The SEO canonical points to another site; kept, listed for review (canonicals to the old site are dropped, since the new site is canonical now) |
-| `SEO_CANONICAL_INVALID` | The SEO canonical URL was not http(s) and was dropped |
+| `SEO_CANONICAL_INVALID` | The SEO canonical URL was not http(s), or contained credentials (`user:pass@`), and was dropped |
 | `SEO_RANKMATH_HEADLESS_OFF` | Rank Math's headless API (`rankmath/v1/getHead`) is off, so no Rank Math SEO was migrated; listed once per run. Turn on Rank Math → General Settings → Others → Headless CMS Support |
 | `SEO_FETCH_FAILED` | Rank Math SEO could not be read for some documents (request failed, invalid or oversized head, or a permalink Rank Math cannot resolve); they were migrated without SEO. Listed once per run with a count |
 | `TRANSFORMER_FAILED` | A custom transformer threw; the built-in rule was used instead |
