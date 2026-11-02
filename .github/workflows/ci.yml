@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir site && cd site
           npm init -y > /dev/null
-          npm install --ignore-scripts --no-audit --no-fund payload@3 "$RUNNER_TEMP"/wp2payload-*.tgz
+          npm install --ignore-scripts --no-audit --no-fund payload@3.92.1 "$RUNNER_TEMP"/wp2payload-*.tgz
           npx wp2payload --version
           npx wp2payload doctor
       - name: Doctor fails outside a Payload project

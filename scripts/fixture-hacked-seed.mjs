@@ -44,7 +44,6 @@ async function waitReady() {
 
 function updateEnv(values) {
   const path = join(ROOT, '.env');
-  // No existsSync first: the file could change between that check and the write (CodeQL).
   let lines = [];
   try {
     lines = readFileSync(path, 'utf8').split(/\r?\n/);
