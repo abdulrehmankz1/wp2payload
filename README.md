@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/wp2payload.svg)](https://www.npmjs.com/package/wp2payload)
 [![CI](https://github.com/abdulrehmankz1/wp2payload/actions/workflows/ci.yml/badge.svg)](https://github.com/abdulrehmankz1/wp2payload/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/abdulrehmankz1/wp2payload/badge)](https://scorecard.dev/viewer/?uri=github.com/abdulrehmankz1/wp2payload)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Migrate a WordPress site into [Payload CMS 3](https://payloadcms.com): posts, pages,
@@ -263,7 +264,7 @@ for end-to-end runs is described in
 
 Please report vulnerabilities privately through
 [GitHub security advisories](https://github.com/abdulrehmankz1/wp2payload/security/advisories/new)
-rather than in public issues.
+rather than in public issues. See [SECURITY.md](SECURITY.md) for response times and scope.
 
 ## License
 
