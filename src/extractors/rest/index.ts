@@ -48,6 +48,8 @@ interface ReusableRun {
   docs: Set<string>
 }
 const SKIPPED_SAMPLE = 10
+// Migrated, or editor and theme internals rather than content (wp_* types are skipped too).
+const NOT_CONTENT_TYPES = new Set(['post', 'page', 'attachment', 'nav_menu_item'])
 // Cheap pre-check before tokenising; the tokeniser decides what really is a delimiter.
 const MAY_HAVE_REUSABLE = /<!--\s+wp:(?:core\/)?block[\s/]/
 
@@ -122,7 +124,38 @@ export class RestExtractor implements Extractor {
     const info: SourceInfo = { siteUrl: str(body.url) ?? this.#c.site.base, counts }
     if (namespaces.includes('yoast/v1')) info.seoPlugin = 'yoast'
     else if (namespaces.includes('rankmath/v1')) info.seoPlugin = 'rankmath'
+    const other = await this.#unmigratedTypes()
+    if (other.length) info.unmigratedTypes = other
     return info
+  }
+
+  /**
+   * Content types other than posts and pages (WooCommerce products, portfolio items...), with
+   * item counts. Best effort: a type that cannot be counted is left out.
+   */
+  async #unmigratedTypes(): Promise<{ type: string; count: number }[]> {
+    let types: unknown
+    try {
+      types = (await this.#c.get('/wp-json/wp/v2/types')).json
+    } catch (e) {
+      if (e instanceof RestError) return []
+      throw e
+    }
+    if (!isObj(types)) return []
+    const out: { type: string; count: number }[] = []
+    for (const [slug, t] of Object.entries(types)) {
+      if (!isObj(t) || NOT_CONTENT_TYPES.has(slug) || slug.startsWith('wp_')) continue
+      const base = str(t.rest_base)
+      const ns = str(t.rest_namespace) ?? 'wp/v2'
+      if (!base || !/^[a-z0-9/_-]+$/i.test(`${ns}/${base}`)) continue
+      try {
+        const total = Number((await this.#c.get(`/wp-json/${ns}/${base}`, { per_page: 1 })).headers.get('x-wp-total'))
+        if (Number.isSafeInteger(total) && total > 0) out.push({ type: toPlainText(slug).slice(0, 64), count: total })
+      } catch (e) {
+        if (!(e instanceof RestError)) throw e
+      }
+    }
+    return out
   }
 
   /** Where warnings go. The runner calls this once its report exists (a report per run). */
@@ -218,6 +251,12 @@ export class RestExtractor implements Extractor {
     const reusable: ReusableRun = { cache: new Map(), skipped: new Map(), docs: new Set() }
     // 'auto' decides Rank Math lazily, only once a document without Yoast data shows up.
     let rankMath: boolean | undefined = plugin === 'rankmath' ? true : plugin === 'auto' ? undefined : false
+    for (const { type, count } of await this.#unmigratedTypes()) {
+      this.#onWarning?.({
+        code: 'DOC_TYPE_UNMAPPED',
+        detail: `Post type "${type}" (${count} item${count === 1 ? '' : 's'}) was not migrated: the REST source migrates posts and pages`,
+      })
+    }
     try {
       for (const [ep, type] of [['posts', 'post'], ['pages', 'page']] as const) {
         for await (const p of this.#pages(`/wp-json/wp/v2/${ep}`, query)) {
@@ -427,6 +466,20 @@ function mapSeo(raw: unknown): IRSeo | undefined {
   return Object.keys(seo).length > 0 ? seo : undefined
 }
 
+/**
+ * The page builder a document was made with, from its markers. Elementor keeps its layout in post
+ * meta and leaves only a plain HTML copy in raw content, so its marker is in the rendered HTML;
+ * Divi and WPBakery store their layout as shortcodes in the content itself.
+ */
+export function pageBuilder(raw: string, rendered: string): string | undefined {
+  if (/\bdata-elementor-type=|class="elementor elementor-\d/.test(rendered)) return 'Elementor'
+  // A whole section, so a post that only mentions a shortcode is not taken for a layout.
+  if (/\[et_pb_section\b[\s\S]*?\[\/et_pb_section\]/.test(raw)) return 'Divi'
+  if (/\[vc_row\b[\s\S]*?\[\/vc_row\]/.test(raw)) return 'WPBakery'
+  if (/\bclass="fl-builder-content\b/.test(rendered)) return 'Beaver Builder'
+  return undefined
+}
+
 function mapDocument(p: Json, type: 'post' | 'page'): IRDocument {
   const rawHtml = nested(p.content, 'raw')
   const html = rawHtml ?? nested(p.content, 'rendered') ?? ''
@@ -434,6 +487,8 @@ function mapDocument(p: Json, type: 'post' | 'page'): IRDocument {
   const excerptSrc = nested(p.excerpt, 'raw') ?? nested(p.excerpt, 'rendered')
   const meta: Record<string, unknown> = { contentFormat: rawHtml !== undefined ? 'raw' : 'rendered' }
   if (original) meta.wpStatus = original
+  const builder = pageBuilder(html, nested(p.content, 'rendered') ?? '')
+  if (builder) meta.pageBuilder = builder
   for (const k of ['format', 'sticky', 'template', 'menu_order', 'comment_status'] as const) {
     if (p[k] !== undefined && p[k] !== '') meta[k] = p[k]
   }

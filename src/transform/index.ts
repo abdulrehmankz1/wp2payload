@@ -80,6 +80,14 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
   if (unknown.size) warn({ code: 'UNKNOWN_BLOCK', detail: `Kept as sanitized HTML or links: ${unknown}` })
 
   const html = clean.join('\n')
+  // ADR-0005: page-builder layouts and shortcodes are not converted, so say so instead of
+  // leaving them as unexplained text.
+  const builder = typeof doc.meta['pageBuilder'] === 'string' ? doc.meta['pageBuilder'] : undefined
+  if (builder) {
+    warn({ code: 'PAGE_BUILDER_LAYOUT', detail: `Built with ${builder}: text, images and links were migrated; its layout (sections, columns, styling) was not` })
+  }
+  const codes = shortcodes(html, builder)
+  if (codes.size) warn({ code: 'SHORTCODE_NOT_MIGRATED', detail: `Shortcodes kept as text, their output was not migrated: ${codes}` })
   const spam = spamFinding(html, { doc: ref })
   if (spam) ctx.report.finding(spam)
   const lexical = htmlToLexical(html, { externalLinkRel: ctx.externalLinkRel, ...ctx.lexical, doc: ref })
@@ -133,6 +141,26 @@ function holds(file: string, text: string): boolean {
   } catch {
     return false
   }
+}
+
+// `[name]`, `[name attr=...]` or `[/name]` in text. Plain bracketed words ("[sic]") are not
+// shortcodes, so a name without a separator counts only with attributes, a closing tag or when
+// WordPress itself defines it.
+const SHORTCODE = /\[(\/?)([a-z][a-z0-9_-]{0,48})((?:\s+[a-z_][\w-]*\s*=)?)[^\][]*\]/gi
+const CORE_SHORTCODES = new Set(['gallery', 'audio', 'video', 'playlist', 'embed'])
+
+function shortcodes(html: string, builder: string | undefined): Tally {
+  const text = html.replace(/<[^>]*>/g, ' ')
+  const tags = [...text.matchAll(SHORTCODE)].map(([, close, name, attrs]) => ({ close: close === '/', name: name!.toLowerCase(), attrs: attrs !== '' }))
+  const closed = new Set(tags.filter((t) => t.close).map((t) => t.name))
+  const found = new Tally()
+  for (const t of tags) {
+    if (t.close || !(t.attrs || closed.has(t.name) || CORE_SHORTCODES.has(t.name) || /[_-]/.test(t.name))) continue
+    // The builder's own layout shortcodes are covered by PAGE_BUILDER_LAYOUT.
+    if (builder && /^(?:et_pb_|vc_)/.test(t.name)) continue
+    found.add(t.name)
+  }
+  return found
 }
 
 // About the pass itself, not the content: the whole post can hit a limit no single block reached.

@@ -65,6 +65,8 @@ export interface SourceInfo {
   wpVersion?: string
   counts: Partial<Record<'posts' | 'pages' | 'media' | 'categories' | 'tags' | 'users', number>>
   seoPlugin?: 'yoast' | 'rankmath'
+  /** Content types the source has but does not migrate (e.g. WooCommerce products), with counts. */
+  unmigratedTypes?: { type: string; count: number }[]
 }
 
 export interface Extractor {

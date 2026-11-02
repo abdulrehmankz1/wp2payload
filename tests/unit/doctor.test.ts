@@ -68,6 +68,21 @@ describe('runDoctor', () => {
     }
   })
 
+  it('warns about content types that will not be migrated, without failing', async () => {
+    await writeConfig(`export default { source: { type: 'rest', url: 'https://example.com' } }`)
+    const code = await runDoctor({
+      cwd: root,
+      log,
+      createExtractor: () => ({
+        probe: async () => ({ siteUrl: 'https://example.com', counts: {}, unmigratedTypes: [{ type: 'product', count: 9 }, { type: 'bad\u001b]52;c;x\u0007', count: 1 }] }),
+        rankMathHeadless: async () => 'unknown' as const,
+      }),
+    })
+    expect(code).toBe(0)
+    expect(output()).toMatch(/! Some content types will not be migrated\n\s+9 product, 1 bad/)
+    expect(output()).not.toContain('\u001b]52')
+  })
+
   it('reports a source failure with its next step and exits 1', async () => {
     await writeConfig(`export default { source: { type: 'rest', url: 'https://example.com' } }`)
     const code = await runDoctor({

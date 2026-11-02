@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { RestExtractor, RestError, decodeEntities } from '../../src/extractors/rest/index.js'
+import { RestExtractor, RestError, decodeEntities, pageBuilder } from '../../src/extractors/rest/index.js'
 
 const post = JSON.parse(readFileSync(new URL('../fixtures/rest/post.json', import.meta.url), 'utf8')) as Record<string, unknown>
 
@@ -120,7 +120,7 @@ describe('mapping (AC-S3-2)', () => {
       },
       meta: { contentFormat: 'raw', format: 'standard' },
     })
-    expect(calls[0]?.url).toContain('context=edit')
+    expect(calls.find((c) => c.url.includes('/wp/v2/posts'))?.url).toContain('context=edit')
   })
 
   it('falls back to rendered content unauthenticated and flags it', async () => {
@@ -129,7 +129,7 @@ describe('mapping (AC-S3-2)', () => {
     const docs = await collect(ex.documents())
     expect(docs[0]).toMatchObject({ type: 'page', html: '<p>Hi</p>', title: 'A & B', excerpt: 'Ex', parentWpId: 4, featuredMediaWpId: 8 })
     expect(docs[0]?.meta.contentFormat).toBe('rendered')
-    expect(calls[0]?.url).not.toContain('context=edit')
+    expect(calls.find((c) => c.url.includes('/wp/v2/posts'))?.url).not.toContain('context=edit')
     expect((calls[0]?.init?.headers as Record<string, string>).Authorization).toBeUndefined()
   })
 
@@ -335,5 +335,43 @@ describe('auth (AC-S3-4)', () => {
 
   it('rejects credentials embedded in the URL', () => {
     expect(() => new RestExtractor({ url: 'https://u:p@example.com' })).toThrow(/WP_USER/)
+  })
+})
+
+describe('content the REST source does not convert', () => {
+  it('detects page builders from their markers', () => {
+    expect(pageBuilder('<p>Hi</p>', '<div data-elementor-type="wp-page" data-elementor-id="5" class="elementor elementor-5">')).toBe('Elementor')
+    expect(pageBuilder('[et_pb_section fb_built="1"][et_pb_row]x[/et_pb_row][/et_pb_section]', '')).toBe('Divi')
+    expect(pageBuilder('[vc_row][vc_column]x[/vc_column][/vc_row]', '')).toBe('WPBakery')
+    expect(pageBuilder('', '<div class="fl-builder-content fl-builder-content-5">')).toBe('Beaver Builder')
+    expect(pageBuilder('<p>About elementor and [vc_row]s</p>', '<p>About elementor</p>')).toBeUndefined()
+  })
+
+  it('counts other content types in probe and reports them once when documents are read', async () => {
+    const { ex } = make((url) => {
+      if (url.pathname === '/wp-json/wp/v2/types') {
+        return {
+          body: {
+            post: { rest_base: 'posts' },
+            product: { rest_base: 'product', rest_namespace: 'wp/v2' },
+            portfolio: { rest_base: 'portfolio' },
+            empty_type: { rest_base: 'empty' },
+            wp_block: { rest_base: 'blocks' },
+            nav_menu_item: { rest_base: 'menu-items' },
+            odd: { rest_base: '../../x' },
+          },
+        }
+      }
+      const totals: Record<string, string> = { '/wp-json/wp/v2/product': '9', '/wp-json/wp/v2/portfolio': '1', '/wp-json/wp/v2/empty': '0' }
+      return { body: url.pathname === '/wp-json/' ? {} : [], headers: { 'x-wp-total': totals[url.pathname] ?? '0', 'x-wp-totalpages': '1' } }
+    })
+    expect((await ex.probe()).unmigratedTypes).toEqual([{ type: 'product', count: 9 }, { type: 'portfolio', count: 1 }])
+    const warnings: { code: string; detail: string }[] = []
+    ex.setWarningSink((w) => warnings.push(w))
+    await collect(ex.documents())
+    expect(warnings).toEqual([
+      { code: 'DOC_TYPE_UNMAPPED', detail: 'Post type "product" (9 items) was not migrated: the REST source migrates posts and pages' },
+      { code: 'DOC_TYPE_UNMAPPED', detail: 'Post type "portfolio" (1 item) was not migrated: the REST source migrates posts and pages' },
+    ])
   })
 })

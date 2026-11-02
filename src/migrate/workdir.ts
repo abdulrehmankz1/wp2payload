@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { STATE_DIR } from '../state/store.js'
@@ -11,6 +10,10 @@ export async function ensureWorkDir(root: string): Promise<string> {
   const dir = path.join(root, STATE_DIR)
   await mkdir(dir, { recursive: true })
   const ignore = path.join(dir, '.gitignore')
-  if (!existsSync(ignore)) await writeFile(ignore, '# Created by wp2payload: local migration data, never commit it.\n*\n', 'utf8')
+  try {
+    await writeFile(ignore, '# Created by wp2payload: local migration data, never commit it.\n*\n', { encoding: 'utf8', flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
   return dir
 }
