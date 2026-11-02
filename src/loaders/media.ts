@@ -9,7 +9,7 @@ const PHASE = 'media'
 
 export interface MediaLoaderOptions {
   root: string // project folder; quarantine goes under <root>/.wp2payload/quarantine
-  sourceUrl: string // configured source.url: the only host allowed the local/http exception
+  sourceUrl?: string // configured source.url: the only host allowed the local/http exception
   allowedHosts?: readonly string[]
   allowSvg?: boolean
   reencode?: boolean
@@ -35,13 +35,13 @@ export async function loadMedia(
   media: AsyncIterable<IRMedia> | Iterable<IRMedia>,
   opts: MediaLoaderOptions,
 ): Promise<void> {
-  const source = new URL(opts.sourceUrl)
+  const source = opts.sourceUrl ? new URL(opts.sourceUrl) : undefined
   const base =
     opts.download ??
     ((url: string) =>
       safeDownload(url, {
-        sourceHost: source.hostname,
-        ...(source.port ? { sourcePort: Number(source.port) } : {}),
+        sourceHost: source?.hostname ?? '',
+        ...(source?.port ? { sourcePort: Number(source.port) } : {}),
         allowedHosts: opts.allowedHosts ?? [],
         maxBytes: (opts.maxFileSizeMB ?? 50) * 1024 * 1024,
       }))
@@ -81,7 +81,7 @@ export async function loadMedia(
       const got = await download(m.sourceUrl)
       if (got.sourceHostException && !exceptionReported) {
         exceptionReported = true
-        ctx.report.warning({ code: 'MEDIA_SOURCE_HOST_EXCEPTION', detail: `Media from ${source.host} was fetched over a local or private address (doc 12.6)` })
+        ctx.report.warning({ code: 'MEDIA_SOURCE_HOST_EXCEPTION', detail: `Media from ${source?.host} was fetched over a local or private address (doc 12.6)` })
       }
 
       const inspected = await inspectMedia({

@@ -28,6 +28,9 @@ const restSource = z.strictObject({
 const wxrSource = z.strictObject({
   type: z.literal('wxr'),
   file: nonEmpty('a path to the WXR export file'),
+  // The site's address, when you know it: its host then gets the source-host exception (doc 12.6
+  // item 3), as with the REST source. Without it the host named in the file is only allowlisted.
+  url: httpUrl.optional(),
 })
 
 const sqlSource = z.strictObject({

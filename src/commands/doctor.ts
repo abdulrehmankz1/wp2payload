@@ -4,6 +4,8 @@ import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import { checkNodeVersion, checkPayloadInstalled, type CheckResult } from '../doctor/checks.js'
 import { RestError, RestExtractor } from '../extractors/rest/index.js'
+import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
+import type { SourceInfo } from '../ir/types.js'
 import { clean } from '../report/summary.js'
 import { formatLine } from '../ui/output.js'
 
@@ -14,15 +16,46 @@ export interface DoctorOptions {
   log?: (line: string) => void
   // Injected in tests so the source check needs no network.
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
+  createWxrExtractor?: (file: string) => Pick<WxrExtractor, 'probe'>
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
   new RestExtractor(source.auth ? { url: source.url, auth: source.auth } : { url: source.url })
 
+function unmigrated(info: SourceInfo): CheckResult[] {
+  if (!info.unmigratedTypes?.length) return []
+  return [{
+    status: 'warn',
+    title: 'Some content types will not be migrated',
+    detail: `${info.unmigratedTypes.map((t) => `${t.count} ${clean(t.type)}`).join(', ')}\nwp2payload migrates posts, pages, media, terms and authors.`,
+  }]
+}
+
+async function checkWxr(file: string, opts: DoctorOptions): Promise<CheckResult[]> {
+  try {
+    const info = await (opts.createWxrExtractor ?? ((f) => new WxrExtractor({ file: f })))(file).probe()
+    const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
+    return [
+      { status: 'ok', title: `Export of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
+      ...unmigrated(info),
+      // An export holds the content, not the files.
+      {
+        status: 'warn',
+        title: 'Media is downloaded from the site',
+        detail: `${clean(new URL(info.siteUrl).host)} must still be online for media to migrate.\nFor a local copy (localhost, LocalWP), set url in the source to its address.`,
+      },
+    ]
+  } catch (error) {
+    if (!(error instanceof WxrError)) throw error
+    return [{ status: 'fail', title: error.message }]
+  }
+}
+
 async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise<CheckResult[]> {
   const { source } = config
+  if (source.type === 'wxr') return checkWxr(path.resolve(opts.cwd ?? process.cwd(), source.file), opts)
   if (source.type !== 'rest') {
-    return [{ status: 'warn', title: `Source type "${source.type}" is not supported yet`, detail: 'Only the REST source works in this version.' }]
+    return [{ status: 'warn', title: 'Source type "sql" is not supported yet', detail: 'Use the REST source (a live site) or a WXR export file.' }]
   }
   try {
     const extractor = (opts.createExtractor ?? defaultExtractor)(source)
@@ -34,13 +67,7 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
       // siteUrl comes from the site itself: a hacked site must not reach the terminal raw.
       { status: 'ok', title: `WordPress at ${clean(info.siteUrl)}`, detail: `${counts || 'no counts available'}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
     ]
-    if (info.unmigratedTypes?.length) {
-      results.push({
-        status: 'warn',
-        title: 'Some content types will not be migrated',
-        detail: `${info.unmigratedTypes.map((t) => `${t.count} ${clean(t.type)}`).join(', ')}\nwp2payload migrates posts, pages, media, terms and authors.`,
-      })
-    }
+    results.push(...unmigrated(info))
     const plugin = config.seo.plugin
     if (plugin === 'rankmath' || (plugin === 'auto' && info.seoPlugin === 'rankmath')) {
       // Rank Math SEO is only readable through getHead, which needs its headless setting (spec 07).

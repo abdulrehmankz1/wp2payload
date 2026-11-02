@@ -60,6 +60,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `SEO_CANONICAL_INVALID` | The SEO canonical URL was not http(s), or contained credentials (`user:pass@`), and was dropped |
 | `SEO_RANKMATH_HEADLESS_OFF` | Rank Math's headless API (`rankmath/v1/getHead`) is off, so no Rank Math SEO was migrated; listed once per run. Turn on Rank Math → General Settings → Others → Headless CMS Support |
 | `SEO_FETCH_FAILED` | Rank Math SEO could not be read for some documents (request failed, invalid or oversized head, or a permalink Rank Math cannot resolve); they were migrated without SEO. Listed once per run with a count |
+| `SEO_TEMPLATE_UNRESOLVED` | WXR source: an SEO title or description uses a Yoast or Rank Math template variable other than title, site name, separator, page or excerpt, so it was left out. Listed once per run with a sample of documents |
 | `TRANSFORMER_FAILED` | A custom transformer threw; the built-in rule was used instead |
 | `BLOCK_ATTRS_INVALID` | A block comment had attributes that are not valid JSON |
 | `BLOCK_UNCLOSED` | A block was never closed; it was closed at the end of the content |
@@ -70,7 +71,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated. A link to a migrated media file or attachment page is reported too when the target link feature cannot link to the media collection (`enabledCollections`); otherwise it becomes an internal link to the upload |
 | `MEDIA_NOT_MIGRATED` | An image in content points at media that was not migrated |
 | `CONTENT_DROPPED` | Content that could not be converted at all |
-| `DOC_TYPE_UNMAPPED` | A WordPress post type that was not migrated, listed once per type: one with no entry in `collections`, or one the REST source does not read yet (WooCommerce products, portfolio items...), with its item count |
+| `DOC_TYPE_UNMAPPED` | A WordPress post type that was not migrated, listed once per type: one with no entry in `collections`, or one the source does not read yet (WooCommerce products, portfolio items...), with its item count |
 | `FIELD_NOT_IN_TARGET` | WordPress has data for a mapped field the target collection lacks, or has with the wrong type; listed once per collection and field |
 | `STATUS_NOT_KEPT` | Draft, private or scheduled content went into a collection without drafts, so it is live; listed once per collection |
 | `TITLE_EMPTY` | The WordPress title was empty; the document was written as "(no title)" |

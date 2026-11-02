@@ -83,6 +83,30 @@ describe('runDoctor', () => {
     expect(output()).not.toContain('\u001b]52')
   })
 
+  it('checks a WXR export file and says media still comes from the site', async () => {
+    await writeConfig(`export default { source: { type: 'wxr', file: './export.xml' } }`)
+    const files: string[] = []
+    const code = await runDoctor({
+      cwd: root,
+      log,
+      createWxrExtractor: (f) => {
+        files.push(f)
+        return { probe: async () => ({ siteUrl: 'https://old.example', counts: { posts: 4 }, seoPlugin: 'rankmath' as const }) }
+      },
+    })
+    expect(code).toBe(0)
+    expect(files).toEqual([path.join(root, 'export.xml')])
+    expect(output()).toMatch(/✔ Export of https:\/\/old\.example\n\s+4 posts\n\s+SEO plugin: rankmath/)
+    expect(output()).toMatch(/! Media is downloaded from the site\n\s+old\.example must still be online/)
+    expect(output()).not.toMatch(/Revoke the Application Password/)
+  })
+
+  it('fails on an export file that cannot be read', async () => {
+    await writeConfig(`export default { source: { type: 'wxr', file: './missing.xml' } }`)
+    expect(await runDoctor({ cwd: root, log })).toBe(1)
+    expect(output()).toMatch(/✖ Export file not found/)
+  })
+
   it('reports a source failure with its next step and exits 1', async () => {
     await writeConfig(`export default { source: { type: 'rest', url: 'https://example.com' } }`)
     const code = await runDoctor({

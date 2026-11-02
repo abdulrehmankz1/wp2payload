@@ -8,7 +8,8 @@ import type { ReportJson, SecurityFinding } from '../../src/report/types.js'
 import { startDocumentsPayload, type DocumentsTestPayload } from '../int/documents-harness.js'
 
 // Doc 12.14: migrate the hacked-site fixture (tests/fixtures/hacked-site) into a real Payload and
-// assert none of the seeded threats reach it and every one of them is in the report.
+// assert none of the seeded threats reach it and every one of them is in the report. One test file
+// per source (one Payload per process), each calling hackedSiteSuite.
 // Needs the fixture: `node scripts/fixture-hacked-seed.mjs`. Skipped without it, except when
 // WP2P_REQUIRE_HACKED=1 (CI and the release gate), where a missing fixture fails the suite.
 
@@ -18,9 +19,15 @@ try {
   // No .env: the fixture is not seeded on this machine.
 }
 const URL_ = process.env['HACKED_WP_URL']
+const WXR = process.env['HACKED_WXR_FILE']
 const required = process.env['WP2P_REQUIRE_HACKED'] === '1'
 
-describe.runIf(URL_ !== undefined || required)('hacked-site fixture (doc 12.14)', () => {
+export const SOURCES = {
+  rest: `{ type: 'rest', url: process.env.HACKED_WP_URL, auth: { user: process.env.HACKED_WP_USER, appPassword: process.env.HACKED_WP_APP_PASSWORD } }`,
+  wxr: `{ type: 'wxr', file: ${JSON.stringify(path.resolve(WXR ?? 'missing-export.xml'))}, url: process.env.HACKED_WP_URL }`,
+}
+
+export const hackedSiteSuite = (name: string, source: string) => describe.runIf(URL_ !== undefined || required)(`hacked-site fixture over ${name} (doc 12.14)`, () => {
   let t: DocumentsTestPayload
   let cwd: string
   let exit: number
@@ -28,13 +35,13 @@ describe.runIf(URL_ !== undefined || required)('hacked-site fixture (doc 12.14)'
   const lines: string[] = []
 
   beforeAll(async () => {
-    if (!URL_) throw new Error('WP2P_REQUIRE_HACKED=1 but HACKED_WP_URL is not set: run node scripts/fixture-hacked-seed.mjs first')
+    if (!URL_ || !WXR) throw new Error('WP2P_REQUIRE_HACKED=1 but HACKED_WP_URL or HACKED_WXR_FILE is not set: run node scripts/fixture-hacked-seed.mjs first')
     t = await startDocumentsPayload({ excerpt: true })
     cwd = await mkdtemp(path.join(os.tmpdir(), 'wp2p-hacked-'))
     await writeFile(
       path.join(cwd, 'wp2payload.config.ts'),
       `export default {
-  source: { type: 'rest', url: process.env.HACKED_WP_URL, auth: { user: process.env.HACKED_WP_USER, appPassword: process.env.HACKED_WP_APP_PASSWORD } },
+  source: ${source},
   collections: {
     post: { to: 'posts', fields: { content: 'content', excerpt: 'excerpt', featuredImage: 'heroImage' } },
     page: { to: 'pages', fields: { content: 'content', parent: 'parent' } },
