@@ -5,6 +5,7 @@ import { RestClient } from './client.js'
 import { normaliseSlug, toPlainText } from './decode.js'
 import { RestError, type LookupFn } from './net.js'
 import { parseRankMathHead } from './rankmath.js'
+import { inlineReusableBlocks, type ReusableContent } from './reusable.js'
 
 export { RestError } from './net.js'
 export { decodeEntities } from './decode.js'
@@ -38,6 +39,17 @@ interface SeoRun {
   headlessOff: boolean
   failed: string[]
 }
+
+/** Per documents() run: reusable block content by ref, and blocks left out, to report once at the end. */
+interface ReusableRun {
+  cache: Map<number, Promise<ReusableContent>>
+  /** By ref and reason: how many documents, a sample of them, and the last one (a document counts once). */
+  skipped: Map<string, { ref: number; reason: string; count: number; sample: string[]; last: string }>
+  docs: Set<string>
+}
+const SKIPPED_SAMPLE = 10
+// Cheap pre-check before tokenising; the tokeniser decides what really is a delimiter.
+const MAY_HAVE_REUSABLE = /<!--\s+wp:(?:core\/)?block[\s/]/
 
 type Json = Record<string, unknown>
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -201,12 +213,17 @@ export class RestExtractor implements Extractor {
     if (this.#c.authenticated) query.context = 'edit'
     const plugin = this.#seoPlugin
     const run: SeoRun = { headlessOff: false, failed: [] }
+    const reusable: ReusableRun = { cache: new Map(), skipped: new Map(), docs: new Set() }
     // 'auto' decides Rank Math lazily, only once a document without Yoast data shows up.
     let rankMath: boolean | undefined = plugin === 'rankmath' ? true : plugin === 'auto' ? undefined : false
     try {
       for (const [ep, type] of [['posts', 'post'], ['pages', 'page']] as const) {
         for await (const p of this.#pages(`/wp-json/wp/v2/${ep}`, query)) {
           const doc = mapDocument(p, type)
+          // Rendered content already has published reusable blocks in place; raw content has only the reference.
+          if (doc.meta.contentFormat === 'raw' && MAY_HAVE_REUSABLE.test(doc.html)) {
+            doc.html = await this.#inlineReusable(doc, reusable)
+          }
           if ((plugin === 'auto' || plugin === 'yoast') && isObj(p.yoast_head_json)) {
             const seo = mapSeo(p.yoast_head_json)
             if (seo) doc.seo = seo
@@ -239,7 +256,64 @@ export class RestExtractor implements Extractor {
           detail: `Rank Math SEO could not be read for ${n} document${n === 1 ? '' : 's'} (${sample}); migrated without SEO. Check that their permalinks open on the site, then run again.`,
         })
       }
+      this.#reportReusable(reusable)
     }
+  }
+
+  /** The document HTML with its reusable blocks inlined. Never throws a RestError: unusable blocks are collected in `run`. */
+  async #inlineReusable(doc: IRDocument, run: ReusableRun): Promise<string> {
+    const id = `${doc.type}:${doc.wpId}`
+    const load = (ref: number) => {
+      let p = run.cache.get(ref)
+      if (!p) run.cache.set(ref, (p = this.#reusableBlock(ref)))
+      return p
+    }
+    return inlineReusableBlocks(doc.html, load, (ref, reason) => {
+      run.docs.add(id)
+      const key = `${ref}\0${reason}`
+      const entry = run.skipped.get(key)
+      if (!entry) run.skipped.set(key, { ref, reason, count: 1, sample: [id], last: id })
+      else if (entry.last !== id) {
+        entry.count++
+        entry.last = id
+        if (entry.sample.length < FAILED_SAMPLE) entry.sample.push(id)
+      }
+    })
+  }
+
+  /** One reusable block (post type wp_block). Only published, unprotected blocks are used: WordPress renders nothing for the rest. */
+  async #reusableBlock(ref: number): Promise<ReusableContent> {
+    let json: unknown
+    try {
+      json = (await this.#c.get(`/wp-json/wp/v2/blocks/${ref}`, this.#c.authenticated ? { context: 'edit' } : {})).json
+    } catch (e) {
+      if (!(e instanceof RestError)) throw e
+      if (isNoRoute(e)) return { reason: 'not readable: this WordPress has no blocks endpoint' }
+      if (e.status === 404) return { reason: 'not found (deleted, or not a reusable block)' }
+      if (e.status === 401 || e.status === 403) return { reason: 'not readable with these credentials' }
+      return { reason: `not readable (${e.code})` }
+    }
+    if (!isObj(json) || !isObj(json.content)) return { reason: 'not readable (unexpected response)' }
+    if (json.content.protected === true) return { reason: 'password protected' }
+    const status = str(json.status)
+    if (status !== undefined && status !== 'publish') return { reason: `not published (${status.slice(0, 20)})` }
+    const html = str(json.content.raw) ?? str(json.content.rendered)
+    return html === undefined ? { reason: 'not readable (no content)' } : { html }
+  }
+
+  #reportReusable(run: ReusableRun): void {
+    if (run.skipped.size === 0) return
+    const entries = [...run.skipped.values()]
+    const docs = run.docs.size
+    const list = entries.slice(0, SKIPPED_SAMPLE).map((e) => {
+      const sample = e.sample.join(', ') + (e.count > e.sample.length ? `, ... ${e.count} documents` : '')
+      return `#${e.ref} ${e.reason} (${sample})`
+    })
+    if (entries.length > SKIPPED_SAMPLE) list.push(`and ${entries.length - SKIPPED_SAMPLE} more`)
+    this.#onWarning?.({
+      code: 'REUSABLE_BLOCK_MISSING',
+      detail: `Reusable blocks left out of ${docs} document${docs === 1 ? '' : 's'}: ${list.join('; ')}. Check them under Appearance → Patterns, then run again.`,
+    })
   }
 
   /** One `getHead` call for one document. Never throws a RestError: failures are counted in `run`. */

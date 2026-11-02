@@ -54,7 +54,8 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
   const clean: string[] = []
   for (const block of normaliseBlocks(parseBlocks(scanned.html, warn), ctx.transformers, warn)) {
     if (block.name === 'core/block') {
-      warn({ code: 'REUSABLE_BLOCK_SKIPPED', detail: 'Reusable block content is stored separately and is not migrated yet' })
+      // The REST extractor inlines every reusable block with a valid ref; what still arrives here was not resolved.
+      warn({ code: 'REUSABLE_BLOCK_SKIPPED', detail: 'Reusable block the source did not resolve (no valid ref); its content was not migrated' })
       continue
     }
     if (block.dynamic && !block.unknown) {

@@ -93,6 +93,27 @@ export function realComments(html: string): number[] {
   return out
 }
 
+/** One block delimiter comment: `[start, end)` offsets of the whole `<!-- ... -->` and what it says. */
+export interface BlockDelimiter {
+  start: number
+  end: number
+  kind: Delimiter['kind']
+  name: string
+  attrs: Record<string, unknown>
+}
+
+/** Every block delimiter in `html`, in order, found exactly as parseBlocks finds them. */
+export function blockDelimiters(html: string): BlockDelimiter[] {
+  const out: BlockDelimiter[] = []
+  const comments = realComments(html)
+  for (let c = 0; c + 2 < comments.length; c += 3) {
+    const bodyEnd = comments[c + 2] as number
+    const d = readDelimiter(html.slice(comments[c + 1] as number, bodyEnd))
+    if (d) out.push({ start: comments[c] as number, end: bodyEnd + 3, kind: d.kind, name: d.name, attrs: d.attrs })
+  }
+  return out
+}
+
 const newBlock = (name: string, attrs: Record<string, unknown>): ParsedBlock => ({
   name,
   attrs,
