@@ -2,12 +2,13 @@
 // Starts and seeds the hacked-site fixture (tests/fixtures/hacked-site, doc 12.14). Idempotent.
 // No npm deps. Never prints the Application Password; it is only written to .env as HACKED_WP_*.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMPOSE_FILE = join(ROOT, 'tests', 'fixtures', 'hacked-site', 'docker-compose.yml');
+const CACHE_DIR = join(ROOT, 'tests', 'fixtures', 'hacked-site', '.cache');
 const SITE_URL = 'http://localhost:8091';
 const EDITOR = 'wp2p-editor';
 const APP_PW_NAME = 'wp2p-hacked';
@@ -89,6 +90,15 @@ async function main() {
   if (!pw) throw new Error('application password creation returned nothing');
   updateEnv({ HACKED_WP_URL: SITE_URL, HACKED_WP_USER: EDITOR, HACKED_WP_APP_PASSWORD: pw });
   log('wrote HACKED_WP_URL, HACKED_WP_USER, HACKED_WP_APP_PASSWORD to .env (value not shown)');
+
+  // The same site as a WordPress export file, for the WXR source.
+  const xml = wp(['export', '--stdout']).out;
+  if (!xml.includes('<wp:wxr_version>')) throw new Error('wp export returned no WXR');
+  mkdirSync(CACHE_DIR, { recursive: true });
+  writeFileSync(join(CACHE_DIR, '.gitignore'), '*\n');
+  writeFileSync(join(CACHE_DIR, 'export.xml'), xml + '\n');
+  updateEnv({ HACKED_WXR_FILE: 'tests/fixtures/hacked-site/.cache/export.xml' });
+  log('wrote the WXR export to tests/fixtures/hacked-site/.cache/export.xml');
   log('done');
 }
 
