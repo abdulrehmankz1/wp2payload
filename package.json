@@ -48,8 +48,10 @@
     "fixture:up": "docker compose up -d",
     "fixture:seed": "node scripts/fixture-seed.mjs",
     "fixture:down": "docker compose down -v",
+    "fixture:hacked": "node scripts/fixture-hacked-seed.mjs",
     "test:unit": "vitest run --project unit",
-    "test:int": "vitest run --project int"
+    "test:int": "vitest run --project int",
+    "test:security": "vitest run --project e2e && vitest run --project unit fuzz sanitize security"
   },
   "dependencies": {
     "commander": "^15.0.0",

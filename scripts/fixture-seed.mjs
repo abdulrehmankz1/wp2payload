@@ -3,7 +3,7 @@
 // Never prints the Application Password; it is only written to .env.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,7 +60,11 @@ async function download() {
   mkdirSync(CACHE_DIR, { recursive: true });
   const file = join(CACHE_DIR, THEME_DATA_FILE);
   const sha = (b) => createHash('sha256').update(b).digest('hex');
-  if (existsSync(file) && sha(readFileSync(file)) === THEME_DATA_SHA256) return;
+  try {
+    if (sha(readFileSync(file)) === THEME_DATA_SHA256) return;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
   log('downloading Theme Unit Test data (pinned commit)...');
   const res = await fetch(THEME_DATA_URL, { redirect: 'error', signal: AbortSignal.timeout(60000) });
   if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
@@ -71,7 +75,13 @@ async function download() {
 
 function updateEnv(values) {
   const path = join(ROOT, '.env');
-  const lines = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/) : [];
+  // No existsSync first: the file could change between that check and the write (CodeQL).
+  let lines = [];
+  try {
+    lines = readFileSync(path, 'utf8').split(/\r?\n/);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   for (const [k, v] of Object.entries(values)) {
     const idx = lines.findIndex((l) => l.startsWith(`${k}=`));

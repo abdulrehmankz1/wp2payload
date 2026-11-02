@@ -18,7 +18,7 @@ const blocks = BlocksFeature({
   ],
 })
 
-const collections = (dir: string): CollectionConfig[] => [
+const collections = (dir: string, excerpt: boolean): CollectionConfig[] => [
   { slug: 'categories', fields: [{ name: 'name', type: 'text', required: true }, { name: 'slug', type: 'text' }, wpMetaField] },
   { slug: 'tags', fields: [{ name: 'name', type: 'text', required: true }, { name: 'slug', type: 'text' }, wpMetaField] },
   { slug: 'authors', fields: [{ name: 'name', type: 'text', required: true }, { name: 'slug', type: 'text' }, wpMetaField] },
@@ -40,6 +40,7 @@ const collections = (dir: string): CollectionConfig[] => [
           ],
         }),
       },
+      ...(excerpt ? [{ name: 'excerpt', type: 'textarea' } as const] : []),
       { name: 'publishedAt', type: 'date' },
       { name: 'author', type: 'relationship', relationTo: 'authors' },
       { name: 'categories', type: 'relationship', relationTo: 'categories', hasMany: true },
@@ -88,14 +89,15 @@ export interface DocumentsTestPayload {
   close(): Promise<void>
 }
 
-export async function startDocumentsPayload(): Promise<DocumentsTestPayload> {
+/** `excerpt` adds a posts.excerpt field; without it, tests check that unmapped fields are skipped. */
+export async function startDocumentsPayload(opts: { excerpt?: boolean } = {}): Promise<DocumentsTestPayload> {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'wp2p-docs-'))
   const config = buildConfig({
     secret: 'test-secret-not-real',
     telemetry: false,
     db: sqliteAdapter({ client: { url: `file:${path.join(dir, 'test.db').replace(/\\/g, '/')}` }, push: true }),
     editor: lexicalEditor(),
-    collections: collections(dir),
+    collections: collections(dir, opts.excerpt === true),
     logger: { options: { level: 'error' } },
   })
   const payload = await getPayload({ config, key: dir })

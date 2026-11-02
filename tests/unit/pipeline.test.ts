@@ -106,6 +106,25 @@ describe('transformDocument', () => {
     expect(existsSync(path.join(root, '.wp2payload'))).toBe(false)
   })
 
+  // Found by the hacked-site fixture: the normaliser rebuilds <p> without its attributes, so a
+  // handler there was dropped without a finding.
+  it('reports threats on wrappers the normaliser rebuilds, and in skipped dynamic blocks, once each', async () => {
+    const { ctx, report } = context({ dryRun: true })
+    await transformDocument(
+      doc([
+        `<!-- wp:paragraph --><p onmouseover="location.href='https://evil.example/'">Hover <img src="/a.jpg" alt="a" onerror="x()"></p><!-- /wp:paragraph -->`,
+        '<!-- wp:latest-posts --><div><script>alert(1)</script></div><!-- /wp:latest-posts -->',
+      ].join('\n')),
+      ctx,
+    )
+    const codes = report.findings.map((f) => `${f.code} ${f.detail}`).sort()
+    expect(codes).toEqual([
+      'SEC_EVENT_HANDLER onerror on <img>',
+      'SEC_JS_REDIRECT JavaScript redirect in onmouseover on <p>',
+      'SEC_SCRIPT_TAG <script>',
+    ])
+  })
+
   it('converts the excerpt to plain text and keeps already-plain title and SEO text as written (T2)', async () => {
     const { ctx } = context()
     const out = await transformDocument(

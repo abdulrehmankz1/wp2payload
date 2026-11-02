@@ -10,7 +10,12 @@ permissions:
   contents: read
 
 jobs:
+  # Doc 12.14 release gate: nothing is published unless the hacked-site suite passes.
+  hacked-site:
+    uses: ./.github/workflows/hacked-site.yml
+
   publish:
+    needs: hacked-site
     runs-on: ubuntu-24.04
     permissions:
       contents: read

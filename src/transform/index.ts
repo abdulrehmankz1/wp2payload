@@ -51,6 +51,7 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
 
   const skipped = new Tally()
   const unknown = new Tally()
+  const seen = new Tally()
   const clean: string[] = []
   for (const block of normaliseBlocks(parseBlocks(scanned.html, warn), ctx.transformers, warn)) {
     if (block.name === 'core/block') {
@@ -64,10 +65,17 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
     }
     if (block.unknown) unknown.add(block.name)
     const result = sanitizeContent(block.html, opts)
+    for (const f of result.findings) seen.add(findingKey(f))
     await quarantine(result.findings, result.quarantine)
     if (result.html.trim()) clean.push(result.html)
     else if (hasText(block.html)) warn({ code: 'CONTENT_DROPPED', detail: `${block.name} had content but nothing safe remained` })
   }
+  // The normaliser rebuilds wrappers (<p>, <figure>, containers) without their attributes and skips
+  // dynamic blocks, so a handler or script only there never reached the sanitizer above. A
+  // report-only pass over the whole post adds the findings the per-block passes did not make.
+  const whole = sanitizeContent(scanned.html, opts)
+  const unseen = whole.findings.filter((f) => !PASS_LIMITS.has(f.code) && !seen.take(findingKey(f)))
+  await quarantine(unseen, whole.quarantine.filter((q) => unseen.includes(q.finding)))
   if (skipped.size) warn({ code: 'DYNAMIC_BLOCK_SKIPPED', detail: `Server-rendered blocks have no stored content: ${skipped}` })
   if (unknown.size) warn({ code: 'UNKNOWN_BLOCK', detail: `Kept as sanitized HTML or links: ${unknown}` })
 
@@ -127,10 +135,21 @@ function holds(file: string, text: string): boolean {
   }
 }
 
+// About the pass itself, not the content: the whole post can hit a limit no single block reached.
+const PASS_LIMITS = new Set(['SEC_MARKUP_LIMIT', 'SEC_NESTING_LIMIT', 'SEC_SCAN_UNSTABLE'])
+const findingKey = (f: SecurityFinding) => `${f.code}\0${f.detail ?? ''}`
+
 class Tally {
   readonly #counts = new Map<string, number>()
   add(name: string) {
     this.#counts.set(name, (this.#counts.get(name) ?? 0) + 1)
+  }
+  /** Removes one occurrence; false when there was none. */
+  take(name: string): boolean {
+    const n = this.#counts.get(name) ?? 0
+    if (n === 0) return false
+    this.#counts.set(name, n - 1)
+    return true
   }
   get size() {
     return this.#counts.size
