@@ -7,6 +7,7 @@ export type WpId = number
 export interface IRMedia {
   wpId: WpId
   sourceUrl: string
+  link?: string // attachment page permalink; links to it resolve to this media
   localPath?: string // set by the sql extractor (file already on disk)
   filename: string
   mimeType: string

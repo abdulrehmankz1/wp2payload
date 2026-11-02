@@ -54,6 +54,8 @@ export interface SanitizeResult {
 export interface UrlResolver {
   /** Payload media ID for an old media URL (size variants like -300x200 included), if migrated. */
   media(url: string): string | number | undefined
+  /** Payload media ID for a link to an old media file or to its attachment page (`?attachment_id=` included). Without it only file URLs count. */
+  mediaLink?(url: string): string | number | undefined
   /** Internal document for an old permalink, if migrated. */
   doc(url: string): { relationTo: string; value: string | number } | undefined
   /** True for URLs on the source site (any scheme, www or not). Without it only relative URLs count. */
@@ -63,6 +65,11 @@ export interface UrlResolver {
 export interface LexicalOptions {
   resolver: UrlResolver
   mediaCollection: string
+  /**
+   * The target link feature can link to `mediaCollection` documents. Links to migrated media files
+   * and attachment pages then become internal links to the upload; otherwise they stay old URLs.
+   */
+  mediaLinks?: boolean
   /** Block slugs available in the target editor; a missing one means "not available". */
   blocks: { embed?: string; wpRawHtml?: string }
   /** Written as `fields.rel` on external custom links when set; the target link feature needs a `rel` field. */

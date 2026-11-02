@@ -154,6 +154,8 @@ export class RestExtractor implements Extractor {
         filename: filenameOf(sourceUrl),
         mimeType: str(m.mime_type) ?? 'application/octet-stream',
       }
+      const link = str(m.link)
+      if (link) out.link = link
       const alt = str(m.alt_text)
       if (alt) out.alt = toPlainText(alt)
       const cap = nested(m.caption, 'raw') ?? nested(m.caption, 'rendered')

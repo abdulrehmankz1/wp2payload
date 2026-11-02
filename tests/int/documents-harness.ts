@@ -8,7 +8,8 @@ import { wpMetaField } from '../../src/loaders/wpmeta.js'
 
 // Real Payload + SQLite shaped like the blog preset (doc 4.7): posts with drafts, an SEO `meta`
 // group, a `heroImage` upload and a Lexical editor with the embed/wpRawHtml blocks; pages with a
-// `parent` and a plain editor; `notes` with a required field the loader never fills.
+// `parent` and a plain editor; `briefs` whose links reach pages only; `notes` with a required
+// field the loader never fills.
 
 const blocks = BlocksFeature({
   blocks: [
@@ -63,6 +64,15 @@ const collections = (dir: string): CollectionConfig[] => [
       { name: 'slug', type: 'text' },
       { name: 'content', type: 'richText', editor: lexicalEditor() },
       { name: 'parent', type: 'relationship', relationTo: 'pages' },
+      wpMetaField,
+    ],
+  },
+  {
+    // Internal links only to pages: links to media cannot become internal links here.
+    slug: 'briefs',
+    fields: [
+      { name: 'title', type: 'text', required: true },
+      { name: 'content', type: 'richText', editor: lexicalEditor({ features: ({ defaultFeatures }) => [...defaultFeatures.filter((f) => f.key !== 'link'), LinkFeature({ enabledCollections: ['pages'] })] }) },
       wpMetaField,
     ],
   },

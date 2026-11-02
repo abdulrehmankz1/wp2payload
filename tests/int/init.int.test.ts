@@ -96,7 +96,12 @@ describe('init --scaffold in a real Payload project (AC-A3)', () => {
     expect(pages.fields.get('parent')).toMatchObject({ kind: 'relationship', relationTo: 'pages' })
     for (const shape of [posts, pages]) {
       expect(shape.drafts).toBe(true)
-      expect(shape.fields.get('content')?.editor).toEqual({ blocks: { embed: 'embed', wpRawHtml: 'wpRawHtml' }, linkRel: true })
+      // The scaffolded link feature reaches media, so links to media files become internal links.
+      expect(shape.fields.get('content')?.editor).toEqual({
+        blocks: { embed: 'embed', wpRawHtml: 'wpRawHtml' },
+        linkRel: true,
+        linkCollections: expect.arrayContaining(['posts', 'pages', 'media']),
+      })
       expect(shape.fields.get('publishedAt')).toMatchObject({ kind: 'date' })
       expect(shape.fields.get('author')).toMatchObject({ kind: 'relationship', relationTo: 'authors', hasMany: false })
       const meta = shape.fields.get('meta')?.fields

@@ -65,7 +65,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `BLOCK_CLOSER_MISMATCH` | A closer for an outer block closed inner blocks implicitly |
 | `BLOCK_DEPTH_EXCEEDED` | Blocks nested deeper than 64; the rest kept as HTML |
 | `LEXICAL_FALLBACK` | Content the editor cannot express was converted best-effort |
-| `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated |
+| `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated. A link to a migrated media file or attachment page is reported too when the target link feature cannot link to the media collection (`enabledCollections`); otherwise it becomes an internal link to the upload |
 | `MEDIA_NOT_MIGRATED` | An image in content points at media that was not migrated |
 | `CONTENT_DROPPED` | Content that could not be converted at all |
 | `DOC_TYPE_UNMAPPED` | A WordPress post type with no entry in `collections`, listed once per type |

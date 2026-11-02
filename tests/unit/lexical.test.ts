@@ -191,6 +191,44 @@ describe('links', () => {
     ])
   })
 
+  describe('links to migrated media', () => {
+    const r = {
+      ...resolver,
+      mediaLink: (url: string) => (url === `${SITE}/?attachment_id=42` || url === 'https://cdn.test/wp-content/uploads/known.pdf' ? 42 : resolver.media(url)),
+    }
+    const html = `<p><a href="${SITE}/wp-content/uploads/known-300x200.jpg">a</a> <a href="${SITE}/?attachment_id=42">b</a> <a href="https://cdn.test/wp-content/uploads/known.pdf">c</a></p>`
+    const toMedia = { linkType: 'internal', newTab: false, doc: { relationTo: 'media', value: 42 } }
+
+    it('become internal links to the upload when the link feature allows the media collection', () => {
+      const { children, warnings } = convert(html, { resolver: r, mediaLinks: true })
+      expect(children[0]!.children!.filter((c) => c.type === 'link').map((l) => l.fields)).toEqual([toMedia, toMedia, toMedia])
+      expect(warnings).toEqual([])
+    })
+
+    it('a link around an image to a media file or page is dropped silently either way', () => {
+      const img = `<a href="${SITE}/?attachment_id=42"><img src="${SITE}/wp-content/uploads/known.jpg"></a>`
+      for (const mediaLinks of [true, false]) {
+        const { children, warnings } = convert(img, { resolver: r, mediaLinks })
+        expect(view(children)).toEqual(['upload'])
+        expect(warnings).toEqual([])
+      }
+    })
+
+    it('stay old URLs with LINK_NOT_MIGRATED otherwise; off-site media links stay external', () => {
+      const { children, warnings } = convert(html, { resolver: r })
+      expect(children[0]!.children!.filter((c) => c.type === 'link').map((l) => l.fields)).toEqual([
+        { linkType: 'custom', newTab: false, url: `${SITE}/wp-content/uploads/known-300x200.jpg` },
+        { linkType: 'custom', newTab: false, url: `${SITE}/?attachment_id=42` },
+        { linkType: 'custom', newTab: false, url: 'https://cdn.test/wp-content/uploads/known.pdf' },
+      ])
+      const hint = '(file was migrated as media; the target link feature cannot link to media)'
+      expect(warnings).toEqual([
+        { code: 'LINK_NOT_MIGRATED', detail: `${SITE}/wp-content/uploads/known-300x200.jpg ${hint}` },
+        { code: 'LINK_NOT_MIGRATED', detail: `${SITE}/?attachment_id=42 ${hint}` },
+      ])
+    })
+  })
+
   it('writes externalLinkRel on external http(s) links only', () => {
     const { children } = convert(
       `<p><a href="https://elsewhere.test/">e</a><a href="${SITE}/gone/">o</a><a href="mailto:a@b.test">m</a><a href="${SITE}/hello-world/">i</a></p>`,
@@ -270,6 +308,13 @@ describe('images', () => {
 
   it('does not warn when the link only points at the full-size file', () => {
     const { warnings } = convert(`<a href="${SITE}/wp-content/uploads/known.jpg"><img src="${SITE}/wp-content/uploads/known-300x200.jpg"></a>`)
+    expect(warnings).toEqual([])
+  })
+
+  it('does not warn when the link around an image points at an attachment page', () => {
+    const r = { ...resolver, mediaLink: (url: string) => (url === `${SITE}/post/known-2/` ? 42 : resolver.media(url)) }
+    const { children, warnings } = convert(`<a href="${SITE}/post/known-2/"><img src="${SITE}/wp-content/uploads/known.jpg"></a>`, { resolver: r })
+    expect(view(children)).toEqual(['upload'])
     expect(warnings).toEqual([])
   })
 

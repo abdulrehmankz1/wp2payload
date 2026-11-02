@@ -222,12 +222,16 @@ deleted is pointed at the migrated document.
 
 | WordPress | Payload |
 | --- | --- |
-| Posts and pages | Your mapped collections, with Lexical content, excerpt, dates, author, categories, tags, featured image and draft status |
+| Posts and pages | Your mapped collections, with Lexical content, excerpt, dates, author, categories, tags, featured image and draft status. Links to other migrated posts and pages become internal links; links to media files (any size) and attachment pages become internal links to the upload when your link feature allows the media collection |
+| Reusable blocks (synced patterns) | Inlined into each document that uses them, nested ones included. With credentials they are read from `/wp/v2/blocks`; without, WordPress serves rendered content that already contains them |
 | Media | Your upload collection, deduplicated by content hash, with alt text and caption |
 | Categories (with hierarchy) and tags | Your mapped collections |
 | Authors | Name and slug only, and only users who wrote migrated content |
 | Yoast SEO and Rank Math | The SEO group (`meta` by default): title, description, image, and noindex and off-site canonicals when your group has them. Rank Math needs **Headless CMS Support** turned on (General Settings → Others); `doctor` tells you when it is off |
 | Old URLs | Redirects |
+
+An internal link to an upload points at the media document, so your frontend's link component
+should use that document's `url` (a component that always builds `/<slug>` would give a broken link).
 
 Passwords, roles and capabilities are never migrated. Blocks with no stored content
 (query loops, navigation) are reported, and unknown blocks are kept as sanitized HTML.
