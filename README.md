@@ -236,6 +236,10 @@ should use that document's `url` (a component that always builds `/<slug>` would
 
 Passwords, roles and capabilities are never migrated. Blocks with no stored content
 (query loops, navigation) are reported, and unknown blocks are kept as sanitized HTML.
+Pages built with Elementor, Divi, WPBakery or Beaver Builder keep their text, images and
+links but not their layout; shortcodes stay as text; other post types (such as WooCommerce
+products) are not migrated yet. Each of these is listed in the report, and `doctor` names the
+post types it will skip.
 
 ## Reports and local files
 

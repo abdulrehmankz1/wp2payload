@@ -125,6 +125,24 @@ describe('transformDocument', () => {
     ])
   })
 
+  // Found on a real Elementor + WooCommerce site: shortcodes and the builder layout went unreported.
+  it('reports shortcodes left as text, but not bracketed words', async () => {
+    const { ctx, report } = context({ dryRun: true })
+    await transformDocument(
+      doc('<p>[woocommerce_cart] [gallery] [contact-form-7 id="5"] [box]Hi[/box] [box] He said [sic] and [1].</p>'),
+      ctx,
+    )
+    const w = report.warnings.filter((x) => x.code === 'SHORTCODE_NOT_MIGRATED')
+    expect(w).toEqual([{ code: 'SHORTCODE_NOT_MIGRATED', doc: 'post:981', detail: expect.stringMatching(/: woocommerce_cart, gallery, contact-form-7, box x2$/) }])
+  })
+
+  it('flags page-builder layouts once per document, without listing the builder shortcodes', async () => {
+    const { ctx, report } = context({ dryRun: true })
+    await transformDocument(doc('<p>[et_pb_section][et_pb_text]Hello[/et_pb_text][/et_pb_section]</p>', { meta: { pageBuilder: 'Divi' } }), ctx)
+    expect(report.warnings.map((x) => x.code)).toEqual(['PAGE_BUILDER_LAYOUT'])
+    expect(report.warnings[0]!.detail).toMatch(/^Built with Divi: text, images and links were migrated/)
+  })
+
   it('converts the excerpt to plain text and keeps already-plain title and SEO text as written (T2)', async () => {
     const { ctx } = context()
     const out = await transformDocument(

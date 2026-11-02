@@ -51,6 +51,8 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | --- | --- |
 | `UNKNOWN_BLOCK` | Blocks no rule or transformer handles, listed once per document with counts; their HTML is kept after sanitizing (video and audio become links) |
 | `DYNAMIC_BLOCK_SKIPPED` | Server-rendered blocks (query loops, navigation, search...) with no stored content, listed once per document |
+| `PAGE_BUILDER_LAYOUT` | The document was built with Elementor, Divi, WPBakery or Beaver Builder: its text, images and links were migrated, its layout (sections, columns, styling) was not |
+| `SHORTCODE_NOT_MIGRATED` | Shortcodes left in the content as text (for example `[woocommerce_cart]` or `[contact-form-7 id="5"]`), listed once per document with counts; what they rendered on WordPress was not migrated |
 | `REUSABLE_BLOCK_SKIPPED` | A reusable block that reached the transform unresolved (no valid `ref`); its content was not migrated. The REST source inlines every reusable block with a valid ref, so this is rare |
 | `REUSABLE_BLOCK_MISSING` | Reusable blocks (synced patterns) that could not be inlined: not found, not readable with the credentials, not published or password protected (WordPress shows nothing for those either), nested in themselves, nested more than 8 deep, or over the per-document limit (200 blocks, 4 MB). Their place is left empty. Listed once per run, by block, with a count and sample of documents |
 | `QUARANTINE_LIMIT` | More than 50 fragments were removed from one document; the rest are reported but not saved |
@@ -68,7 +70,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated. A link to a migrated media file or attachment page is reported too when the target link feature cannot link to the media collection (`enabledCollections`); otherwise it becomes an internal link to the upload |
 | `MEDIA_NOT_MIGRATED` | An image in content points at media that was not migrated |
 | `CONTENT_DROPPED` | Content that could not be converted at all |
-| `DOC_TYPE_UNMAPPED` | A WordPress post type with no entry in `collections`, listed once per type |
+| `DOC_TYPE_UNMAPPED` | A WordPress post type that was not migrated, listed once per type: one with no entry in `collections`, or one the REST source does not read yet (WooCommerce products, portfolio items...), with its item count |
 | `FIELD_NOT_IN_TARGET` | WordPress has data for a mapped field the target collection lacks, or has with the wrong type; listed once per collection and field |
 | `STATUS_NOT_KEPT` | Draft, private or scheduled content went into a collection without drafts, so it is live; listed once per collection |
 | `TITLE_EMPTY` | The WordPress title was empty; the document was written as "(no title)" |

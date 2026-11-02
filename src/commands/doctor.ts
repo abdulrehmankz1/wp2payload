@@ -34,6 +34,13 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
       // siteUrl comes from the site itself: a hacked site must not reach the terminal raw.
       { status: 'ok', title: `WordPress at ${clean(info.siteUrl)}`, detail: `${counts || 'no counts available'}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
     ]
+    if (info.unmigratedTypes?.length) {
+      results.push({
+        status: 'warn',
+        title: 'Some content types will not be migrated',
+        detail: `${info.unmigratedTypes.map((t) => `${t.count} ${clean(t.type)}`).join(', ')}\nwp2payload migrates posts, pages, media, terms and authors.`,
+      })
+    }
     const plugin = config.seo.plugin
     if (plugin === 'rankmath' || (plugin === 'auto' && info.seoPlugin === 'rankmath')) {
       // Rank Math SEO is only readable through getHead, which needs its headless setting (spec 07).
