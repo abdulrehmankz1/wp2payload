@@ -367,6 +367,9 @@ function allowlistOptions(opts: SanitizeOptions): IOptions {
   return {
     ...CONTENT_POLICY,
     allowedTags: [...(CONTENT_POLICY.allowedTags as string[]), EMBED_TAG],
+    // Raw-text elements are dropped with their content. The pre-scan skips them (RAW_TEXT_TAGS),
+    // so keeping their text would let `<noembed>eval(atob(...))</noembed>` through unscanned.
+    nonTextTags: ['script', 'style', 'textarea', 'option', 'xmp', 'noembed', 'noframes', 'title', 'iframe'],
     // `rel` is set by the transform below, never taken from the input.
     allowedAttributes: { ...base, a: [...(base.a ?? []), 'rel'], [EMBED_TAG]: [EMBED_ATTR] },
     transformTags: {

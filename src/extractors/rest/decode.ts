@@ -45,6 +45,9 @@ export function normaliseText(input: string): string {
  * route params compare the decoded form. Decodes once to NFC, drops invisible characters and
  * turns separators an encoded slug could smuggle in (`%2F`, `?`, `#`, `\`) into hyphens.
  */
+// A JSON `\ud800` escape gives half a character, which cannot be put back into a URL.
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
+
 export function normaliseSlug(raw: string): string {
   let s = raw
   try {
@@ -52,9 +55,11 @@ export function normaliseSlug(raw: string): string {
   } catch {
     // Malformed escapes: keep the slug as WordPress sent it.
   }
+  // NFC last: removing a character can leave a letter and its combining mark side by side.
   return s
-    .normalize('NFC')
     .replace(/[\p{Cc}\p{Zl}\p{Zp}\s]/gu, '')
     .replace(BIDI, '')
     .replace(/[/?#\\]/g, '-')
+    .replace(LONE_SURROGATE, '')
+    .normalize('NFC')
 }

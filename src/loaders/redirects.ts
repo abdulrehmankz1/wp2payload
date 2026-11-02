@@ -166,7 +166,9 @@ export function pluginFromOf(p: OldPath): string {
 }
 
 function encodeSegment(s: string): string {
-  const raw = decodeSegment(s) // WordPress slugs of non-ASCII titles arrive percent-encoded
+  // WordPress slugs of non-ASCII titles arrive percent-encoded. Half a surrogate pair cannot be
+  // percent-encoded (URIError), so it becomes U+FFFD instead of failing the whole phase.
+  const raw = decodeSegment(s).replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, '�')
   return encodeURIComponent(raw).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
 }
 
