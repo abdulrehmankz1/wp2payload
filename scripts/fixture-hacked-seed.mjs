@@ -2,7 +2,7 @@
 // Starts and seeds the hacked-site fixture (tests/fixtures/hacked-site, doc 12.14). Idempotent.
 // No npm deps. Never prints the Application Password; it is only written to .env as HACKED_WP_*.
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -44,7 +44,13 @@ async function waitReady() {
 
 function updateEnv(values) {
   const path = join(ROOT, '.env');
-  const lines = existsSync(path) ? readFileSync(path, 'utf8').split(/\r?\n/) : [];
+  // No existsSync first: the file could change between that check and the write (CodeQL).
+  let lines = [];
+  try {
+    lines = readFileSync(path, 'utf8').split(/\r?\n/);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
   while (lines.length && lines[lines.length - 1] === '') lines.pop();
   for (const [k, v] of Object.entries(values)) {
     const idx = lines.findIndex((l) => l.startsWith(`${k}=`));
