@@ -260,6 +260,15 @@ Integration tests run against a real Payload instance on SQLite. A WordPress fix
 for end-to-end runs is described in
 [`tests/fixtures/wordpress`](tests/fixtures/wordpress/README.md).
 
+A second fixture is a deliberately hacked WordPress site
+([`tests/fixtures/hacked-site`](tests/fixtures/hacked-site/README.md)). CI migrates it on every
+change and before every release, and checks that none of its threats reach Payload:
+
+```bash
+corepack pnpm fixture:hacked   # needs Docker
+corepack pnpm test:security    # hacked-site run and sanitizer fuzzing
+```
+
 ## Security
 
 Please report vulnerabilities privately through

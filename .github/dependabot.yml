@@ -11,6 +11,13 @@ updates:
     groups:
       dependencies:
         patterns: ['*']
+    ignore:
+      # Types follow the oldest supported Node (engines >=22.12), not the newest.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # Payload 3 requires graphql 16.
+      - dependency-name: graphql
+        update-types: ['version-update:semver-major']
     open-pull-requests-limit: 5
 
   - package-ecosystem: github-actions

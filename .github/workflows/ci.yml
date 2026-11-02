@@ -63,3 +63,6 @@ jobs:
           if node ../site/node_modules/wp2payload/dist/cli.js doctor; then
             echo "doctor should exit non-zero without Payload" && exit 1
           fi
+
+  hacked-site:
+    uses: ./.github/workflows/hacked-site.yml
