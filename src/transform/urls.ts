@@ -5,11 +5,13 @@ import type { UrlResolver } from './types.js'
 export interface SiteUrlResolver extends UrlResolver {
   /** Relative, or on the source site's host (www and scheme ignored). */
   isOldSite(url: string): boolean
+  mediaLink(url: string): string | number | undefined
 }
 
 export interface UrlResolverInput {
   siteOrigin: string
-  media: Iterable<{ wpId: WpId; sourceUrl: string }>
+  /** `link` is the attachment page permalink, when the source has one. */
+  media: Iterable<{ wpId: WpId; sourceUrl: string; link?: string }>
   documents: Iterable<{ wpId: WpId; type: IdKind; link: string }>
   ids: IdMap
   /** IR document type → Payload collection slug, e.g. `{ post: 'posts', page: 'pages' }`. */
@@ -46,6 +48,16 @@ export function buildUrlResolver(input: UrlResolverInput): SiteUrlResolver {
   // Exact source URLs always win over a derived original name.
   for (const [key, wpId] of derived) if (!media.has(key)) media.set(key, wpId)
 
+  // Attachment pages: the permalink, and the plain forms WordPress answers whatever the permalink setting.
+  const pages = new Map<string, WpId>()
+  for (const m of input.media) {
+    for (const url of [m.link, `?attachment_id=${m.wpId}`, `?p=${m.wpId}`]) {
+      const key = url === undefined ? undefined : urlKey(url, base, true)
+      // Never the front page, whatever an odd `link` says.
+      if (key !== undefined && key !== `${siteHost}/` && !pages.has(key)) pages.set(key, m.wpId)
+    }
+  }
+
   const docs = new Map<string, { wpId: WpId; type: IdKind }>()
   for (const d of input.documents) {
     const entry = { wpId: d.wpId, type: d.type }
@@ -68,17 +80,26 @@ export function buildUrlResolver(input: UrlResolverInput): SiteUrlResolver {
     return paged && paged[1] !== siteHost ? docs.get(paged[1]!) : undefined
   }
 
+  const findMedia = (url: string) => {
+    let key = urlKey(url, base)
+    // Strip one suffix at a time, so the nearest original wins (banner-1200x400-300x100 → banner-1200x400).
+    for (let i = 0; key !== undefined && i <= MAX_STRIPS; i++) {
+      const wpId = media.get(key)
+      if (wpId !== undefined) return input.ids.get('media', wpId)
+      const next = withStem(key, (stem) => stem.replace(VARIANT, ''))
+      key = next === key ? undefined : next
+    }
+    return undefined
+  }
+
   return {
-    media(url) {
-      let key = urlKey(url, base)
-      // Strip one suffix at a time, so the nearest original wins (banner-1200x400-300x100 → banner-1200x400).
-      for (let i = 0; key !== undefined && i <= MAX_STRIPS; i++) {
-        const wpId = media.get(key)
-        if (wpId !== undefined) return input.ids.get('media', wpId)
-        const next = withStem(key, (stem) => stem.replace(VARIANT, ''))
-        key = next === key ? undefined : next
-      }
-      return undefined
+    media: findMedia,
+    mediaLink(url) {
+      const file = findMedia(url)
+      if (file !== undefined) return file
+      const key = urlKey(url, base, true)
+      const wpId = key === undefined ? undefined : pages.get(key)
+      return wpId === undefined ? undefined : input.ids.get('media', wpId)
     },
     doc(url) {
       const entry = findDoc(url)

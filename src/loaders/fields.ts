@@ -25,6 +25,8 @@ export interface EditorSupport {
   blocks: LexicalOptions['blocks']
   /** The link feature has a `rel` field, so `fields.rel` on links is part of the schema. */
   linkRel: boolean
+  /** Collections the link feature's internal links can point to (its `doc` field). */
+  linkCollections: string[]
 }
 
 export interface CollectionShape {
@@ -81,7 +83,7 @@ interface BlockLike {
  */
 export function editorSupport(payload: Payload, editor: unknown): EditorSupport {
   const map = (editor as { editorConfig?: { resolvedFeatureMap?: unknown } } | undefined)?.editorConfig?.resolvedFeatureMap
-  const support: EditorSupport = { blocks: {}, linkRel: false }
+  const support: EditorSupport = { blocks: {}, linkRel: false, linkCollections: [] }
   if (!(map instanceof Map)) return support
   const feature = (key: string) => (map.get(key) as { sanitizedServerFeatureProps?: Record<string, unknown> } | undefined)?.sanitizedServerFeatureProps
 
@@ -97,6 +99,10 @@ export function editorSupport(payload: Payload, editor: unknown): EditorSupport 
   if (has('wpRawHtml', ['html'])) support.blocks.wpRawHtml = 'wpRawHtml'
 
   const linkFields = feature('link')?.['fields']
-  support.linkRel = Array.isArray(linkFields) && linkFields.some((f: unknown) => (f as { name?: string }).name === 'rel')
+  const fields = (Array.isArray(linkFields) ? linkFields : []) as { name?: string; relationTo?: unknown }[]
+  support.linkRel = fields.some((f) => f.name === 'rel')
+  // Payload leaves `doc` out when no collection is linkable; relationTo is then always an array.
+  const to = fields.find((f) => f.name === 'doc')?.relationTo
+  support.linkCollections = Array.isArray(to) ? to.filter((s): s is string => typeof s === 'string') : typeof to === 'string' ? [to] : []
   return support
 }

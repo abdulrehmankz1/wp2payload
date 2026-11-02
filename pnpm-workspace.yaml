@@ -1,3 +1,9 @@
 # esbuild (via tsup) works without its postinstall; keep install-time code off (doc 12.13).
 allowBuilds:
   esbuild: false
+
+# Dev-only advisories (Payload admin UI and test tooling; never shipped to users). Raise the
+# floor to the patched release; drop an entry once its parent package requires the fix itself.
+overrides:
+  dompurify: '>=3.4.17'
+  happy-dom: '>=21.0.4'

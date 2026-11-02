@@ -109,6 +109,36 @@ describe('buildUrlResolver media', () => {
   })
 })
 
+describe('buildUrlResolver mediaLink (attachment pages)', () => {
+  const r = buildUrlResolver({
+    siteOrigin: 'https://oldsite.test',
+    media: [
+      { wpId: 10, sourceUrl: `${UP}/photo.jpg`, link: 'https://oldsite.test/2021/04/hello-world/photo/' },
+      { wpId: 12, sourceUrl: `${UP}/unmigrated.jpg`, link: 'https://oldsite.test/unmigrated/' },
+      { wpId: 13, sourceUrl: `${UP}/odd.jpg`, link: 'https://oldsite.test/' },
+    ],
+    documents: [{ wpId: 5, type: 'post', link: 'https://oldsite.test/2021/04/hello-world/' }],
+    ids: idMap([['media', 10, 100], ['media', 13, 130], ['post', 5, 50]]),
+    docCollections: { post: 'posts' },
+  })
+
+  it('resolves files (size variants included), attachment permalinks and plain forms', () => {
+    expect(r.mediaLink(`${UP}/photo-300x200.jpg`)).toBe(100)
+    expect(r.mediaLink('http://www.oldsite.test/2021/04/Hello-World/photo')).toBe(100)
+    expect(r.mediaLink('/?attachment_id=10')).toBe(100)
+    expect(r.mediaLink('https://oldsite.test/index.php?p=10')).toBe(100)
+  })
+
+  it('is not used for image sources, documents, unmigrated media or the front page', () => {
+    expect(r.media('https://oldsite.test/2021/04/hello-world/photo/')).toBeUndefined()
+    expect(r.mediaLink('https://oldsite.test/2021/04/hello-world/')).toBeUndefined()
+    expect(r.mediaLink('/unmigrated/')).toBeUndefined()
+    expect(r.mediaLink('/?attachment_id=12')).toBeUndefined()
+    expect(r.mediaLink('https://oldsite.test/')).toBeUndefined()
+    expect(r.mediaLink('/?attachment_id=13')).toBe(130)
+  })
+})
+
 describe('buildUrlResolver documents', () => {
   const r = setup()
 

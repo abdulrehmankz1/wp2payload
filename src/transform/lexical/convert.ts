@@ -303,12 +303,23 @@ class Builder {
     if (url.startsWith('#')) return { fields }
     const doc = this.opts.resolver.doc(url)
     if (doc) return { fields: { linkType: 'internal', newTab: false, doc: { relationTo: doc.relationTo, value: doc.value } } }
+    // Before the old-site check: media from an allowed CDN host is migrated too.
+    const media = this.mediaLink(url)
+    if (media !== undefined && this.opts.mediaLinks && this.opts.mediaCollection) {
+      return { fields: { linkType: 'internal', newTab: false, doc: { relationTo: this.opts.mediaCollection, value: media } } }
+    }
     if (!this.isOldSite(url)) {
       const rel = this.opts.externalLinkRel
       return { fields: rel && /^https?:\/\//i.test(url) ? { ...fields, rel } : fields }
     }
-    const media = this.opts.resolver.media(url) !== undefined
-    return { fields, issue: { code: 'LINK_NOT_MIGRATED', detail: media ? `${url} (file was migrated as media)` : url } }
+    const detail = media === undefined ? url : `${url} (file was migrated as media; the target link feature cannot link to ${this.opts.mediaCollection || 'media'})`
+    return { fields, issue: { code: 'LINK_NOT_MIGRATED', detail } }
+  }
+
+  /** Media ID for a link to an old media file or attachment page. */
+  private mediaLink(url: string): string | number | undefined {
+    const r = this.opts.resolver
+    return r.mediaLink ? r.mediaLink(url) : r.media(url)
   }
 
   private isOldSite(url: string): boolean {
@@ -328,7 +339,12 @@ class Builder {
     const id = this.opts.resolver.media(src)
     if (id !== undefined) {
       const fields = link?.node.type === 'link' ? link.node.fields : undefined
-      if (fields && !(fields.linkType === 'custom' && this.opts.resolver.media(fields.url) !== undefined)) {
+      // A link to a media file or attachment page adds nothing to the upload itself, so dropping it is silent.
+      const toMedia =
+        fields?.linkType === 'custom'
+          ? this.mediaLink(fields.url) !== undefined
+          : fields?.linkType === 'internal' && fields.doc.relationTo === this.opts.mediaCollection
+      if (fields && !toMedia) {
         const target = fields.linkType === 'custom' ? fields.url : `${fields.doc.relationTo}:${fields.doc.value}`
         this.warn('LEXICAL_FALLBACK', `link around image not kept on the upload: ${clip(target)}`)
       }

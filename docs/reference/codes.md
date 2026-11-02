@@ -51,7 +51,8 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | --- | --- |
 | `UNKNOWN_BLOCK` | Blocks no rule or transformer handles, listed once per document with counts; their HTML is kept after sanitizing (video and audio become links) |
 | `DYNAMIC_BLOCK_SKIPPED` | Server-rendered blocks (query loops, navigation, search...) with no stored content, listed once per document |
-| `REUSABLE_BLOCK_SKIPPED` | A reusable block; its content lives in a separate post that is not migrated yet |
+| `REUSABLE_BLOCK_SKIPPED` | A reusable block that reached the transform unresolved (no valid `ref`); its content was not migrated. The REST source inlines every reusable block with a valid ref, so this is rare |
+| `REUSABLE_BLOCK_MISSING` | Reusable blocks (synced patterns) that could not be inlined: not found, not readable with the credentials, not published or password protected (WordPress shows nothing for those either), nested in themselves, nested more than 8 deep, or over the per-document limit (200 blocks, 4 MB). Their place is left empty. Listed once per run, by block, with a count and sample of documents |
 | `QUARANTINE_LIMIT` | More than 50 fragments were removed from one document; the rest are reported but not saved |
 | `SEO_CANONICAL_OFFSITE` | The SEO canonical points to another site; kept, listed for review (canonicals to the old site are dropped, since the new site is canonical now) |
 | `SEO_CANONICAL_INVALID` | The SEO canonical URL was not http(s), or contained credentials (`user:pass@`), and was dropped |
@@ -64,7 +65,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `BLOCK_CLOSER_MISMATCH` | A closer for an outer block closed inner blocks implicitly |
 | `BLOCK_DEPTH_EXCEEDED` | Blocks nested deeper than 64; the rest kept as HTML |
 | `LEXICAL_FALLBACK` | Content the editor cannot express was converted best-effort |
-| `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated |
+| `LINK_NOT_MIGRATED` | A link to the old site points at content that was not migrated. A link to a migrated media file or attachment page is reported too when the target link feature cannot link to the media collection (`enabledCollections`); otherwise it becomes an internal link to the upload |
 | `MEDIA_NOT_MIGRATED` | An image in content points at media that was not migrated |
 | `CONTENT_DROPPED` | Content that could not be converted at all |
 | `DOC_TYPE_UNMAPPED` | A WordPress post type with no entry in `collections`, listed once per type |

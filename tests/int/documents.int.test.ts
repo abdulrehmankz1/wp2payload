@@ -120,10 +120,12 @@ describe('describeCollection', () => {
     expect(posts.fields.get('categories')).toMatchObject({ kind: 'relationship', hasMany: true, relationTo: 'categories' })
     expect(posts.fields.get('heroImage')).toMatchObject({ kind: 'relationship', type: 'upload', hasMany: false })
     expect([...(posts.fields.get('meta')?.fields?.keys() ?? [])]).toEqual(['title', 'description', 'image'])
-    expect(posts.fields.get('content')?.editor).toEqual({ blocks: { embed: 'embed', wpRawHtml: 'wpRawHtml' }, linkRel: true })
+    const linkable = expect.arrayContaining(['media', 'posts', 'pages'])
+    expect(posts.fields.get('content')?.editor).toEqual({ blocks: { embed: 'embed', wpRawHtml: 'wpRawHtml' }, linkRel: true, linkCollections: linkable })
     const pages = describeCollection(t.payload, 'pages')
     expect(pages.drafts).toBe(false)
-    expect(pages.fields.get('content')?.editor).toEqual({ blocks: {}, linkRel: false })
+    expect(pages.fields.get('content')?.editor).toEqual({ blocks: {}, linkRel: false, linkCollections: linkable })
+    expect(describeCollection(t.payload, 'briefs').fields.get('content')?.editor?.linkCollections).toEqual(['pages'])
   })
 })
 
@@ -203,6 +205,36 @@ describe('loadDocuments', () => {
     expect(after).toBe(before)
     expect(b.map.get('post:1')).toBe(a.map.get('post:1'))
     expect(b.report.findings.filter((f) => f.code === 'SEC_SCRIPT_TAG')).toHaveLength(1)
+  })
+
+  it('links to media files and attachment pages become internal links to the upload when the link feature allows it', async () => {
+    const site = 'https://medialinks.test'
+    const { ctx, report, map } = mkCtx(site)
+    const refs = await seedRefs(ctx)
+    const up = `${ORIGIN}/wp-content/uploads/2021/04`
+    const html =
+      `<p><a href="${up}/hero-300x200.png">file</a> <a href="${ORIGIN}/first/hero/">page</a> <a href="${ORIGIN}/?attachment_id=50">id</a></p>` +
+      `<p><a href="${ORIGIN}/first/hero/"><img src="${up}/hero.png" alt="Hero"></a></p>`
+    const docs = [doc(1, 'post', 'first', { html }), doc(2, 'brief', 'brief', { html })]
+    const opts = options(docs, {
+      targets: { post: { collection: 'posts', fields: {} }, brief: { collection: 'briefs' as never, fields: {} } },
+      media: [{ wpId: 50, sourceUrl: `${up}/hero.png`, link: `${ORIGIN}/first/hero/` }],
+    })
+    await loadDocuments(ctx, source(docs), opts)
+    expect(report.errors).toEqual([])
+
+    const toMedia = { linkType: 'internal', newTab: false, doc: { relationTo: 'media', value: refs.media } }
+    const post = await read('posts', map.get('post:1')!)
+    expect(links(post['content'])).toEqual([toMedia, toMedia, toMedia])
+    expect(JSON.stringify(post['content'])).toContain('"type":"upload"')
+    expect(report.warnings.filter((w) => w.doc === 'post:1')).toEqual([])
+
+    // `briefs` links only to pages: old URLs stay, reported; the link around the image is still silent.
+    const brief = (await t.payload.findByID({ collection: 'briefs' as never, id: map.get('brief:2')!, depth: 0 })) as unknown as Record<string, unknown>
+    expect(links(brief['content']).map((l) => l['linkType'])).toEqual(['custom', 'custom', 'custom'])
+    const briefWarnings = report.warnings.filter((w) => w.doc === 'brief:2')
+    expect(briefWarnings.map((w) => w.code)).toEqual(['LINK_NOT_MIGRATED', 'LINK_NOT_MIGRATED', 'LINK_NOT_MIGRATED'])
+    expect(briefWarnings[0]!.detail).toContain('cannot link to media')
   })
 
   it('dry run writes nothing, counts the same and treats documents of the run as migrated', async () => {

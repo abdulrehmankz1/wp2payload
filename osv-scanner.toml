@@ -1,0 +1,13 @@
+# Accepted advisories in dev-only dependencies (doc 12.13). None of these packages ships in the
+# published tarball, which has its own dependency audit (`pnpm audit --prod`). Each entry expires,
+# so it is looked at again.
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+ignoreUntil = 2027-01-31
+reason = "esbuild <0.25 under drizzle-kit (@payloadcms/db-sqlite, tests only); affects esbuild's dev server, which is never started"
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-01-31
+reason = "deepmerge inside payload (dev and peer dependency, the user's own install); no patched release yet"

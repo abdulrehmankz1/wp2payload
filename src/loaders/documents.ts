@@ -19,8 +19,8 @@ export interface DocumentsLoaderOptions {
   /** IR doc type → target. Other types are skipped with DOC_TYPE_UNMAPPED (once per type). */
   targets: Record<string, DocumentTarget>
   transform: Omit<TransformContext, 'report' | 'dryRun' | 'lexical'>
-  /** All media of the source, for the URL resolver. */
-  media: Iterable<{ wpId: number; sourceUrl: string }>
+  /** All media of the source, for the URL resolver (`link`: attachment page). */
+  media: Iterable<{ wpId: number; sourceUrl: string; link?: string }>
   /** All permalinks of this run (from the spill). */
   documents: Iterable<{ wpId: number; type: string; link: string }>
   /** Config `seo.field`, default 'meta'. `target.fields.seo` overrides it per collection. */
@@ -118,7 +118,7 @@ export async function loadDocuments(
   }
 
   const transform = async (doc: IRDocument, shape: CollectionShape, contentField: TargetField | undefined, resolver: UrlResolver, report: ReportSink) => {
-    const editor = contentField?.editor ?? { blocks: {}, linkRel: false }
+    const editor = contentField?.editor ?? { blocks: {}, linkRel: false, linkCollections: [] }
     return transformDocument(doc, {
       ...opts.transform,
       report,
@@ -126,6 +126,7 @@ export async function loadDocuments(
       lexical: {
         resolver,
         mediaCollection: opts.mediaCollection ?? '',
+        mediaLinks: opts.mediaCollection !== undefined && editor.linkCollections.includes(opts.mediaCollection),
         blocks: editor.blocks,
         // Empty means "no rel": written only when the target link feature has a `rel` field.
         externalLinkRel: editor.linkRel ? opts.transform.externalLinkRel : '',
@@ -181,6 +182,7 @@ export async function loadDocuments(
         ? anticipating
         : {
             media: (url) => real.media(url),
+            mediaLink: (url) => real.mediaLink(url),
             isOldSite: (url) => real.isOldSite(url),
             doc(url) {
               const found = real.doc(url)

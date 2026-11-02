@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/wp2payload.svg)](https://www.npmjs.com/package/wp2payload)
 [![CI](https://github.com/abdulrehmankz1/wp2payload/actions/workflows/ci.yml/badge.svg)](https://github.com/abdulrehmankz1/wp2payload/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/abdulrehmankz1/wp2payload/badge)](https://scorecard.dev/viewer/?uri=github.com/abdulrehmankz1/wp2payload)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Migrate a WordPress site into [Payload CMS 3](https://payloadcms.com): posts, pages,
@@ -89,6 +90,9 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
 | `report` | Prints the last migration report again (`--json` for the raw file). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
+
+Run commands from your project folder or any folder inside it: wp2payload uses the nearest
+folder above that has `wp2payload.config.ts`, without going past your project's `package.json`.
 
 ### migrate options
 
@@ -219,12 +223,16 @@ deleted is pointed at the migrated document.
 
 | WordPress | Payload |
 | --- | --- |
-| Posts and pages | Your mapped collections, with Lexical content, excerpt, dates, author, categories, tags, featured image and draft status |
+| Posts and pages | Your mapped collections, with Lexical content, excerpt, dates, author, categories, tags, featured image and draft status. Links to other migrated posts and pages become internal links; links to media files (any size) and attachment pages become internal links to the upload when your link feature allows the media collection |
+| Reusable blocks (synced patterns) | Inlined into each document that uses them, nested ones included. With credentials they are read from `/wp/v2/blocks`; without, WordPress serves rendered content that already contains them |
 | Media | Your upload collection, deduplicated by content hash, with alt text and caption |
 | Categories (with hierarchy) and tags | Your mapped collections |
 | Authors | Name and slug only, and only users who wrote migrated content |
 | Yoast SEO and Rank Math | The SEO group (`meta` by default): title, description, image, and noindex and off-site canonicals when your group has them. Rank Math needs **Headless CMS Support** turned on (General Settings → Others); `doctor` tells you when it is off |
 | Old URLs | Redirects |
+
+An internal link to an upload points at the media document, so your frontend's link component
+should use that document's `url` (a component that always builds `/<slug>` would give a broken link).
 
 Passwords, roles and capabilities are never migrated. Blocks with no stored content
 (query loops, navigation) are reported, and unknown blocks are kept as sanitized HTML.
@@ -256,7 +264,7 @@ for end-to-end runs is described in
 
 Please report vulnerabilities privately through
 [GitHub security advisories](https://github.com/abdulrehmankz1/wp2payload/security/advisories/new)
-rather than in public issues.
+rather than in public issues. See [SECURITY.md](SECURITY.md) for response times and scope.
 
 ## License
 

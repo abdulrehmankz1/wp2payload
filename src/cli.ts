@@ -1,17 +1,27 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import path from 'node:path'
 import { Command, InvalidArgumentError, Option } from 'commander'
 import { runDoctor } from './commands/doctor.js'
 import { runReport } from './commands/report.js'
 import { runReset } from './commands/reset.js'
+import { findProjectRoot } from './config/root.js'
 
 // package.json sits one level above both src/ and dist/, and is always published.
 const { version } = createRequire(import.meta.url)('../package.json') as { version: string }
 
+// Run from a subfolder (`src/`), commands work on the project that holds wp2payload.config.ts.
+const here = process.cwd()
+const root = findProjectRoot(here) ?? here
+if (root !== here) console.error(`Using the project in ${root}`)
+// --config is given relative to where the user typed it, not to the project folder.
+const configAt = (p?: string) => (p ? { configPath: path.resolve(here, p) } : {})
+
 // Payload projects keep PAYLOAD_SECRET, DATABASE_URI and the WP_* variables in .env.
 // Variables already set in the shell win, matching dotenv's behaviour.
-if (existsSync('.env')) process.loadEnvFile('.env')
+const envFile = path.join(root, '.env')
+if (existsSync(envFile)) process.loadEnvFile(envFile)
 
 const program = new Command()
   .name('wp2payload')
@@ -40,7 +50,7 @@ program
   .description('Check Node, the Payload project and the WordPress source, without writing anything')
   .option('--config <path>', 'config file location (default: wp2payload.config.ts)')
   .action(async (opts: { config?: string }) => {
-    process.exitCode = await runDoctor(opts.config ? { configPath: opts.config } : {})
+    process.exitCode = await runDoctor({ cwd: root, ...configAt(opts.config) })
   })
 
 const list = (value: string, prev: string[] = []) => [...prev, ...value.split(',').map((s) => s.trim()).filter(Boolean)]
@@ -69,7 +79,8 @@ program
     // Loaded on demand: the pipeline pulls in sharp and the sanitizer, which doctor never needs.
     const { runMigrate } = await import('./commands/migrate.js')
     process.exitCode = await runMigrate({
-      ...(opts.config ? { configPath: opts.config } : {}),
+      cwd: root,
+      ...configAt(opts.config),
       dryRun: opts.dryRun === true,
       ...(opts.only ? { only: opts.only } : {}),
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
@@ -90,14 +101,14 @@ program
   .option('--json', 'print report.json instead of the summary')
   .option('--verbose', 'list every warning and error')
   .action(async (opts: { json?: boolean; verbose?: boolean }) => {
-    process.exitCode = await runReport({ json: opts.json === true, verbose: opts.verbose === true })
+    process.exitCode = await runReport({ cwd: root, json: opts.json === true, verbose: opts.verbose === true })
   })
 
 program
   .command('reset')
   .description('Delete local state. Does not delete any Payload data')
   .action(async () => {
-    process.exitCode = await runReset({})
+    process.exitCode = await runReset({ cwd: root })
   })
 
 interface MigrateCliOptions {
