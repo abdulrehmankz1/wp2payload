@@ -28,6 +28,14 @@ export interface PipelineOptions {
   payload: Payload
   extractor: Extractor
   site: string
+  /** The source site's address; defaults to the REST source URL. */
+  siteUrl?: string
+  /**
+   * Whether the user configured siteUrl, so its host gets the source-host exception (doc 12.6
+   * item 3). Default true. When false (an address read from an export file) the host is only
+   * allowlisted: https, and never a private address.
+   */
+  trustSiteHost?: boolean
   dryRun: boolean
   /** Phases or document types to run; empty means all. */
   only?: readonly string[]
@@ -54,6 +62,7 @@ export interface PipelineOptions {
  */
 export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   const startedAt = new Date()
+  const siteUrl = o.siteUrl ?? sourceUrl(o.config)
   const report = new MemoryReport()
   o.extractor.setWarningSink?.((issue) => report.warning(issue))
   await ensureWorkDir(o.root)
@@ -139,8 +148,8 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
       const m = o.config.media
       await loadMedia(ctx, media, {
         root: o.root,
-        sourceUrl: sourceUrl(o.config),
-        allowedHosts: m.allowedHosts,
+        ...(o.trustSiteHost === false ? {} : { sourceUrl: siteUrl }),
+        allowedHosts: o.trustSiteHost === false ? [...m.allowedHosts, new URL(siteUrl).hostname] : m.allowedHosts,
         allowSvg: o.allowSvg ?? false,
         reencode: m.reencode,
         maxFileSizeMB: m.maxFileSizeMB,
@@ -167,7 +176,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
       await loadDocuments(ctx, () => selected(spill!.read(), types, o.limit), {
         targets,
         transform: {
-          siteOrigin: sourceUrl(o.config),
+          siteOrigin: siteUrl,
           embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? [])],
           externalLinkRel: sec.externalLinkRel,
           transformers: o.config.transformers,
@@ -207,7 +216,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
       const r = o.config.redirects
       const routes = o.payload.config.routes as { admin?: string; api?: string } | undefined
       const result = await loadRedirects(ctx, sources, {
-        siteUrl: sourceUrl(o.config),
+        siteUrl,
         paths: r.paths,
         collection: r.collection as CollectionSlug,
         root: o.root,

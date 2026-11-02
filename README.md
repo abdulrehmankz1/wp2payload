@@ -6,8 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Migrate a WordPress site into [Payload CMS 3](https://payloadcms.com): posts, pages,
-media, categories, tags, authors, SEO metadata and redirects. Safe to re-run, and it
-keeps a hacked site's junk out of your new one.
+media, categories, tags, authors, SEO metadata and redirects, from the live site or a
+WordPress export file. Safe to re-run, and it keeps a hacked site's junk out of your new one.
 
 > **Status: early (0.x).** The full pipeline works and is tested against WordPress
 > Theme Unit Test data, but it has not yet been used on many real sites. Run it
@@ -34,7 +34,8 @@ keeps a hacked site's junk out of your new one.
 
 - Node.js 22.12 or newer
 - A Payload CMS 3 project (any database adapter)
-- A WordPress site reachable over its REST API. An
+- A WordPress site reachable over its REST API, or an export file from
+  **Tools → Export** (see [From an export file](#from-an-export-file-wxr)). For the REST API, an
   [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/)
   is optional but recommended: without it only published content is read, and
   Gutenberg block markup is not available.
@@ -86,7 +87,7 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | Command | What it does |
 | --- | --- |
 | `init` | Writes `wp2payload.config.ts` and appends `.wp2payload/`, `.env` and backup patterns to `.gitignore`. With `--url`, adds `WP_URL` to `.env`. With `--scaffold`, writes the blog preset collections as new files you own; existing files are never overwritten. Other flags: `--force` (replace `wp2payload.config.ts` only), `--yes` (no questions). Your TypeScript files are never edited. |
-| `doctor` | Checks Node.js, your Payload installation and the WordPress connection. Writes nothing. |
+| `doctor` | Checks Node.js, your Payload installation and the WordPress site or export file. Writes nothing. |
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
 | `report` | Prints the last migration report again (`--json` for the raw file). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
@@ -147,6 +148,25 @@ export default defineConfig({
 
 Secrets must come from environment variables: a literal password in the config is
 rejected.
+
+### From an export file (WXR)
+
+When the REST API is blocked or you only have an export, use the file from
+**Tools → Export → All content** instead:
+
+```ts
+source: { type: 'wxr', file: './export.xml' },
+```
+
+The export holds posts, pages, terms, authors and SEO fields, but not the files: media is
+still downloaded from the site named in the export, so it must be online (`doctor` says
+which). That address comes from the file, so it is held to the full download guard (https,
+no private addresses). To download from a local copy of the site (`localhost`, LocalWP),
+name it yourself with `url: process.env.WP_URL`; it then counts as the source host, as with
+the REST source. Yoast and Rank Math titles are stored as templates; the common variables
+(`%%title%%`, `%%sitename%%`, `%%sep%%`) are filled in, and a title with any other variable
+is left out and reported. The file is read as a stream and parsed without DTDs or entity
+expansion; a file with a `DOCTYPE` is refused.
 
 ### Using your existing collections
 
