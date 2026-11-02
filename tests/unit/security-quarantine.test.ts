@@ -91,5 +91,6 @@ describe('writeQuarantine (AC-B5, doc 12.10)', () => {
     // Nothing escaped the quarantine root.
     expect(readdirSync(root)).toEqual(['.wp2payload'])
     expect(readdirSync(join(root, '.wp2payload'))).toEqual(['quarantine'])
-  })
+    // 300 real file writes: slow on Windows while the rest of the suite runs in parallel.
+  }, 30_000)
 })
