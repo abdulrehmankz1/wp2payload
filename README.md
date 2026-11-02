@@ -90,6 +90,9 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `report` | Prints the last migration report again (`--json` for the raw file). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
 
+Run commands from your project folder or any folder inside it: wp2payload uses the nearest
+folder above that has `wp2payload.config.ts`, without going past your project's `package.json`.
+
 ### migrate options
 
 | Flag | Meaning |
