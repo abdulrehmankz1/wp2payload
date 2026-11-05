@@ -13,16 +13,27 @@ import type { LexicalOptions, LexicalResult, QuarantineFragment } from './types.
 /** Fragments written per document; the rest are still reported (a hostile post must not flood the disk). */
 export const MAX_QUARANTINE_PER_DOC = 50
 
-export interface TransformContext {
+/** What the security half needs; `wp2payload scan` runs only that half. */
+export interface SecureContext {
   siteOrigin: string
   embedHosts: readonly string[]
   externalLinkRel: string
   transformers: Transformer[]
-  lexical: Omit<LexicalOptions, 'doc'>
   report: ReportSink
   /** Project folder; quarantine goes under <root>/.wp2payload/quarantine. */
   root: string
   dryRun: boolean
+}
+
+export interface TransformContext extends SecureContext {
+  lexical: Omit<LexicalOptions, 'doc'>
+}
+
+export interface SecuredDocument {
+  /** Sanitized HTML, ready for Lexical. */
+  html: string
+  /** For the caller's link-heavy check against the site median (doc 12.5). */
+  externalLinks: number
 }
 
 export interface TransformedDocument {
@@ -41,6 +52,20 @@ export interface TransformedDocument {
  * text (T2). Everything removed or skipped is reported with `doc` set.
  */
 export async function transformDocument(doc: IRDocument, ctx: TransformContext): Promise<TransformedDocument> {
+  const ref = `${doc.type}:${doc.wpId}`
+  const warn = (i: { code: string; detail: string }) => ctx.report.warning({ ...i, doc: ref })
+  const { html, externalLinks } = await secureDocument(doc, ctx)
+  const lexical = htmlToLexical(html, { externalLinkRel: ctx.externalLinkRel, ...ctx.lexical, doc: ref })
+  for (const w of lexical.warnings) warn(w)
+
+  const out: TransformedDocument = { title: normalisePlain(doc.title), content: lexical.state, externalLinks }
+  if (doc.excerpt !== undefined) out.excerpt = normalisePlain(doc.excerpt)
+  if (doc.seo) out.seo = plainSeo(doc.seo, warn)
+  return out
+}
+
+/** Steps 1-3 of transformDocument: scan, normalise and sanitize, reporting every finding. */
+export async function secureDocument(doc: IRDocument, ctx: SecureContext): Promise<SecuredDocument> {
   const ref = `${doc.type}:${doc.wpId}`
   const warn = (i: { code: string; detail: string }) => ctx.report.warning({ ...i, doc: ref })
   const opts = { doc: ref, siteOrigin: ctx.siteOrigin, embedHosts: ctx.embedHosts, externalLinkRel: ctx.externalLinkRel, spam: false }
@@ -90,24 +115,14 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
   if (codes.size) warn({ code: 'SHORTCODE_NOT_MIGRATED', detail: `Shortcodes kept as text, their output was not migrated: ${codes}` })
   const spam = spamFinding(html, { doc: ref })
   if (spam) ctx.report.finding(spam)
-  const lexical = htmlToLexical(html, { externalLinkRel: ctx.externalLinkRel, ...ctx.lexical, doc: ref })
-  for (const w of lexical.warnings) warn(w)
-
-  const out: TransformedDocument = {
-    title: normalisePlain(doc.title),
-    content: lexical.state,
-    externalLinks: countExternalLinks(html, ctx.siteOrigin),
-  }
-  if (doc.excerpt !== undefined) out.excerpt = normalisePlain(doc.excerpt)
-  if (doc.seo) out.seo = plainSeo(doc.seo, warn)
-  return out
+  return { html, externalLinks: countExternalLinks(html, ctx.siteOrigin) }
 }
 
 /**
  * Reports findings and writes their fragments. Names carry a content hash, so a re-run reuses the
  * same file instead of piling up copies (doc 12.10 stays readable across runs).
  */
-function quarantiner(doc: IRDocument, ctx: TransformContext) {
+function quarantiner(doc: IRDocument, ctx: SecureContext) {
   let written = 0
   let capped = false
   return async (findings: SecurityFinding[], fragments: QuarantineFragment[]) => {

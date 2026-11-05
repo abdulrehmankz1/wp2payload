@@ -96,6 +96,53 @@ program
   })
 
 program
+  .command('scan')
+  .argument('[target]', 'a site URL, export file (.xml), SQL dump (.sql, .sql.gz) or .wpress backup; default: the configured source')
+  .description('Security and content health report of a site, without migrating. Needs no Payload project')
+  .option('--config <path>', 'config file location (default: wp2payload.config.ts)')
+  .option('--uploads <dir>', 'uploads folder for a SQL dump (default: uploads next to the dump)')
+  .option('--no-media', 'do not download or check media files')
+  .option('--limit <n>', 'scan only the first n documents', positiveInt('--limit'))
+  .option('--concurrency <n>', 'parallel media checks (default 4)', positiveInt('--concurrency'))
+  .addOption(new Option('--fail-on-security <level>', 'exit with code 4 if findings at or above this level exist').choices(['low', 'medium', 'high']))
+  .option('--allow-svg', 'accept SVG uploads after a strict check')
+  .option('--allow-embed-host <host>', 'add a trusted iframe host (repeatable)', list)
+  .option('--json', 'print scan.json instead of the summary')
+  .option('--verbose', 'list every warning and error')
+  .action(async (target: string | undefined, opts: ScanCliOptions) => {
+    const { runScanCommand } = await import('./commands/scan.js')
+    process.exitCode = await runScanCommand({
+      cwd: root,
+      ...configAt(opts.config),
+      // A file target is given relative to where the user typed it.
+      ...(target ? { target: /^https?:\/\//i.test(target) ? target : path.resolve(here, target) } : {}),
+      ...(opts.uploads ? { uploads: path.resolve(here, opts.uploads) } : {}),
+      media: opts.media !== false,
+      ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+      ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
+      ...(opts.failOnSecurity ? { failOnSecurity: opts.failOnSecurity } : {}),
+      allowSvg: opts.allowSvg === true,
+      allowEmbedHosts: opts.allowEmbedHost ?? [],
+      json: opts.json === true,
+      verbose: opts.verbose === true,
+      version,
+    })
+  })
+
+interface ScanCliOptions {
+  config?: string
+  uploads?: string
+  media?: boolean
+  limit?: number
+  concurrency?: number
+  failOnSecurity?: 'low' | 'medium' | 'high'
+  allowSvg?: boolean
+  allowEmbedHost?: string[]
+  json?: boolean
+  verbose?: boolean
+}
+
+program
   .command('report')
   .description('Print the last migration report again')
   .option('--json', 'print report.json instead of the summary')
