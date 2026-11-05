@@ -44,6 +44,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `SEC_INSECURE_SCHEME` | high | rejected | Plain http, or a non-http scheme, for a media URL |
 | `SEC_TOO_MANY_REDIRECTS` | high | rejected | More than 3 redirects |
 | `SEC_FILE_TOO_LARGE` | high | rejected | Over `media.maxFileSizeMB` |
+| `SEC_PATH_TRAVERSAL` | high | rejected | Backup sources: the dump names a media file outside the uploads folder (`../`, an absolute path, or a link that points out) |
 
 ## Warnings
 
@@ -88,9 +89,11 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 
 | Code | Meaning |
 | --- | --- |
-| `MEDIA_404` and other `MEDIA_<status>` | The media URL answered with an HTTP error |
+| `MEDIA_404` and other `MEDIA_<status>` | The media URL answered with an HTTP error, or (backup sources) the file is not in the uploads folder or archive |
 | `MEDIA_NETWORK`, `MEDIA_DNS_FAILED`, `MEDIA_TIMEOUT`, `MEDIA_BAD_URL` | The media file could not be fetched |
-| `MEDIA_LOCAL_UNSUPPORTED` | Local media files arrive with the SQL backup source (v1.1) |
+| `MEDIA_LOCAL_UNSUPPORTED` | A media item names a local file but the source has no uploads to read it from |
+| `MEDIA_UPLOADS_MISSING` | SQL source: `source.uploadsDir` does not exist |
+| `MEDIA_READ_FAILED` | .wpress source: a media file could not be read from the archive (it is damaged) |
 | `MEDIA_WRITE_FAILED` | Payload rejected the media upload |
 | `TERM_WRITE_FAILED`, `AUTHOR_WRITE_FAILED` | Payload rejected the write after retries |
 | `REDIRECT_CONFLICT` | Two documents claim the same old URL or the same new path, an old URL equals another document's new path (it would hide that document), or an existing redirect points to another document. The first is kept, nothing is changed, and the phase counts it as `rejected`. A redirect whose document was deleted is repointed instead |

@@ -3,9 +3,8 @@ import { createInterface } from 'node:readline/promises'
 import type { Payload } from 'payload'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import type { Env } from '../config/types.js'
-import { RestError, RestExtractor } from '../extractors/rest/index.js'
-import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
-import type { Extractor, IRDocument } from '../ir/types.js'
+import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
+import type { Extractor } from '../ir/types.js'
 import { siteKey } from '../loaders/wpmeta.js'
 import { DownloadCache } from '../migrate/download-cache.js'
 import { documentTypes, isFirstRun, OnlyError, runPipeline, selectPhases, type Phase } from '../migrate/run.js'
@@ -58,10 +57,6 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     log(formatLine('fail', 'Invalid configuration', error.message))
     return error.exitCode
   }
-  if (config.source.type === 'sql') {
-    log(formatLine('fail', 'Source type "sql" is not supported yet', 'Use the REST source (a live site) or a WXR export file.'))
-    return 1
-  }
   // Usage errors before anything connects (doc 2.8).
   try {
     selectPhases(opts.only, documentTypes(config))
@@ -72,15 +67,18 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
   }
 
   // Doc 2.8: an unreachable source fails before anything is written.
-  const extractor = (opts.createExtractor ?? ((c) => defaultExtractor(c, cwd)))(config)
-  // The configured URL wins; without one, an export file names its own site.
+  let source: OpenedSource
+  // The configured URL wins; without one, an export file or dump names its own site.
   let siteUrl: string
   try {
-    const info = await extractor.probe()
-    siteUrl = config.source.url ?? info.siteUrl
-    log(formatLine('ok', `${config.source.type === 'wxr' ? 'Export of' : 'WordPress at'} ${clean(info.siteUrl)}`))
+    source = opts.createExtractor
+      ? { extractor: opts.createExtractor(config), trustSiteHost: config.source.type === 'rest', label: 'WordPress at', ...(config.source.type === 'rest' ? { configuredUrl: config.source.url } : {}) }
+      : await openSource(config, cwd)
+    const info = await source.extractor.probe()
+    siteUrl = source.configuredUrl ?? info.siteUrl
+    log(formatLine('ok', `${source.label} ${clean(info.siteUrl)}`))
   } catch (error) {
-    if (!(error instanceof RestError || error instanceof WxrError)) throw error
+    if (!isSourceError(error)) throw error
     const [title = error.message, ...rest] = error.message.split('\n')
     log(rest.length ? formatLine('fail', title, rest.join('\n')) : formatLine('fail', title))
     return 1
@@ -119,10 +117,11 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         root: cwd,
         config,
         payload: booted.payload,
-        extractor,
+        extractor: source.extractor,
         site,
         siteUrl,
-        trustSiteHost: config.source.type === 'rest' || (config.source.type === 'wxr' && config.source.url !== undefined),
+        trustSiteHost: source.trustSiteHost,
+        ...(source.readLocalMedia ? { readLocalMedia: source.readLocalMedia } : {}),
         dryRun,
         ...(opts.only ? { only: opts.only } : {}),
         ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
@@ -176,17 +175,6 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     await downloadCache?.dispose()
     await booted.close()
   }
-}
-
-const defaultExtractor = (config: ResolvedConfig, cwd: string): Extractor => {
-  if (config.source.type === 'wxr') {
-    return new WxrExtractor({ file: path.resolve(cwd, config.source.file), statuses: config.statuses, seoPlugin: config.seo.plugin })
-  }
-  if (config.source.type !== 'rest') throw new Error('unreachable: the sql source is refused earlier')
-  const { url, auth } = config.source
-  // The config schema accepts any status string; the extractor maps unknown ones to draft.
-  // Warnings go to the report through setWarningSink, called by the runner once its report exists.
-  return new RestExtractor({ url, ...(auth ? { auth } : {}), statuses: config.statuses as IRDocument['status'][], seoPlugin: config.seo.plugin })
 }
 
 async function ask(question: string): Promise<boolean> {

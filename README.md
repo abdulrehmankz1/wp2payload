@@ -6,8 +6,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Migrate a WordPress site into [Payload CMS 3](https://payloadcms.com): posts, pages,
-media, categories, tags, authors, SEO metadata and redirects, from the live site or a
-WordPress export file. Safe to re-run, and it keeps a hacked site's junk out of your new one.
+media, categories, tags, authors, SEO metadata and redirects, from the live site, a
+WordPress export file or a backup. Safe to re-run, and it keeps a hacked site's junk out of your new one.
 
 > **Status: early (0.x).** The full pipeline works and is tested against WordPress
 > Theme Unit Test data, but it has not yet been used on many real sites. Run it
@@ -34,8 +34,10 @@ WordPress export file. Safe to re-run, and it keeps a hacked site's junk out of 
 
 - Node.js 22.12 or newer
 - A Payload CMS 3 project (any database adapter)
-- A WordPress site reachable over its REST API, or an export file from
-  **Tools → Export** (see [From an export file](#from-an-export-file-wxr)). For the REST API, an
+- A WordPress site reachable over its REST API, an export file from **Tools → Export**
+  (see [From an export file](#from-an-export-file-wxr)), or a backup: a SQL dump with the uploads
+  folder, or an All-in-One WP Migration `.wpress` file (see [From a backup](#from-a-backup)).
+  For the REST API, an
   [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/)
   is optional but recommended: without it only published content is read, and
   Gutenberg block markup is not available.
@@ -167,6 +169,26 @@ the REST source. Yoast and Rank Math titles are stored as templates; the common 
 (`%%title%%`, `%%sitename%%`, `%%sep%%`) are filled in, and a title with any other variable
 is left out and reported. The file is read as a stream and parsed without DTDs or entity
 expansion; a file with a `DOCTYPE` is refused.
+
+### From a backup
+
+When the site is gone and only a backup is left, read it directly. Nothing is downloaded and
+no database server is needed:
+
+```ts
+// A SQL dump (.sql or .sql.gz: mysqldump, phpMyAdmin, hosting backups) and wp-content/uploads
+source: { type: 'sql', file: './backup.sql.gz', uploadsDir: './uploads' },
+// tablePrefix: 'wp_' is the default; doctor names the prefix the dump uses if it differs.
+
+// Or an All-in-One WP Migration backup, read in place without unpacking
+source: { type: 'wpress', file: './site.wpress' },
+```
+
+The dump is read as text and never run against a database, so triggers, procedures and the
+rest of a hacked dump have no effect, and only the columns wp2payload needs are kept: password
+hashes and emails are never read. Old URLs are rebuilt from the permalink settings in the dump.
+Media paths from the dump must stay inside the uploads folder or archive. Encrypted `.wpress`
+backups cannot be read.
 
 ### Using your existing collections
 

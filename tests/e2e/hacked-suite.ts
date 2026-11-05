@@ -20,14 +20,18 @@ try {
 }
 const URL_ = process.env['HACKED_WP_URL']
 const WXR = process.env['HACKED_WXR_FILE']
+const SQL = process.env['HACKED_SQL_FILE']
+const UPLOADS = process.env['HACKED_UPLOADS_DIR']
 const required = process.env['WP2P_REQUIRE_HACKED'] === '1'
 
 export const SOURCES = {
   rest: `{ type: 'rest', url: process.env.HACKED_WP_URL, auth: { user: process.env.HACKED_WP_USER, appPassword: process.env.HACKED_WP_APP_PASSWORD } }`,
   wxr: `{ type: 'wxr', file: ${JSON.stringify(path.resolve(WXR ?? 'missing-export.xml'))}, url: process.env.HACKED_WP_URL }`,
+  sql: `{ type: 'sql', file: ${JSON.stringify(path.resolve(SQL ?? 'missing-backup.sql'))}, uploadsDir: ${JSON.stringify(path.resolve(UPLOADS ?? 'missing-uploads'))} }`,
 }
 
-export const hackedSiteSuite = (name: string, source: string) => describe.runIf(URL_ !== undefined || required)(`hacked-site fixture over ${name} (doc 12.14)`, () => {
+/** `backup`: media comes from the uploads folder, so the SSRF attachments are plain local files. */
+export const hackedSiteSuite = (name: string, source: string, { backup = false } = {}) => describe.runIf(URL_ !== undefined || required)(`hacked-site fixture over ${name} (doc 12.14)`, () => {
   let t: DocumentsTestPayload
   let cwd: string
   let exit: number
@@ -35,7 +39,7 @@ export const hackedSiteSuite = (name: string, source: string) => describe.runIf(
   const lines: string[] = []
 
   beforeAll(async () => {
-    if (!URL_ || !WXR) throw new Error('WP2P_REQUIRE_HACKED=1 but HACKED_WP_URL or HACKED_WXR_FILE is not set: run node scripts/fixture-hacked-seed.mjs first')
+    if (!URL_ || !WXR || !SQL || !UPLOADS) throw new Error('WP2P_REQUIRE_HACKED=1 but the HACKED_* variables are not set: run node scripts/fixture-hacked-seed.mjs first')
     t = await startDocumentsPayload({ excerpt: true })
     cwd = await mkdtemp(path.join(os.tmpdir(), 'wp2p-hacked-'))
     await writeFile(
@@ -143,8 +147,8 @@ export const hackedSiteSuite = (name: string, source: string) => describe.runIf(
     const rejected = new Set(report.security.findings.filter((f) => f.media !== undefined && (f.action === 'rejected' || f.action === 'quarantined')).map((f) => f.media))
     const reasons = report.security.findings.filter((f) => f.media !== undefined).map((f) => f.code)
     for (const code of ['SEC_EXECUTABLE_UPLOAD', 'SEC_SVG_REJECTED', 'SEC_PDF_ACTIVE_CONTENT']) expect(reasons).toContain(code)
-    // logo.jpg.php, shell.phtml, fake.png, js.pdf, scripted.svg and the three SSRF attachments.
-    expect(rejected.size).toBe(8)
+    // logo.jpg.php, shell.phtml, fake.png, js.pdf and scripted.svg, plus the three SSRF attachments when downloading.
+    expect(rejected.size).toBe(backup ? 5 : 8)
   })
 
   it('stores only the clean image and the re-encoded polyglot, with no PHP inside', async () => {
@@ -163,7 +167,12 @@ export const hackedSiteSuite = (name: string, source: string) => describe.runIf(
     expect((await bySlug('hacked-short-fields'))!['heroImage'] ?? null).toBeNull()
   })
 
-  it('blocks media URLs to metadata, internal addresses and other ports of the source host (T9)', async () => {
+  it.runIf(backup)('reads media from the backup and downloads nothing', () => {
+    expect(report.security.findings.some((f) => /^SEC_(HOST_NOT_ALLOWED|SSRF_BLOCKED|INSECURE_SCHEME)$/.test(f.code))).toBe(false)
+    expect(report.warnings.map((w) => w.code)).not.toContain('MEDIA_SOURCE_HOST_EXCEPTION')
+  })
+
+  it.runIf(!backup)('blocks media URLs to metadata, internal addresses and other ports of the source host (T9)', async () => {
     const ssrf = report.security.findings.filter((f) => f.media !== undefined && /^SEC_(HOST_NOT_ALLOWED|SSRF_BLOCKED|INSECURE_SCHEME)$/.test(f.code))
     expect(ssrf.map((f) => f.code).sort()).toEqual(['SEC_HOST_NOT_ALLOWED', 'SEC_HOST_NOT_ALLOWED', 'SEC_SSRF_BLOCKED'])
   })

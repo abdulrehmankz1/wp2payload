@@ -20,6 +20,8 @@ export interface MediaLoaderOptions {
   retry?: RetryOptions
   // Injected in tests; defaults to the guarded downloader.
   download?: (url: string) => Promise<DownloadResult>
+  /** Backup sources: reads an item's localPath (the uploads folder, a .wpress archive) instead of downloading. */
+  readLocal?: (localPath: string, maxBytes: number) => Promise<Buffer>
   /** Wraps the downloader, e.g. to reuse the first-run preview's downloads. */
   wrapDownload?: (download: (url: string) => Promise<DownloadResult>) => (url: string) => Promise<DownloadResult>
 }
@@ -71,14 +73,16 @@ export async function loadMedia(
         ctx.report.count(PHASE, 'reused')
         return
       }
-      if (m.localPath) {
-        // SQL-dump mode reads from the uploads folder inside its sandbox (v1.1).
+      if (m.localPath !== undefined && opts.readLocal === undefined) {
         ctx.report.count(PHASE, 'errors')
-        ctx.report.error({ code: 'MEDIA_LOCAL_UNSUPPORTED', media: m.wpId, detail: 'Local media files are supported from v1.1, with the SQL backup source' })
+        ctx.report.error({ code: 'MEDIA_LOCAL_UNSUPPORTED', media: m.wpId, detail: 'A local media file needs the uploads folder of the backup source' })
         return
       }
 
-      const got = await download(m.sourceUrl)
+      const got =
+        m.localPath !== undefined
+          ? { bytes: await opts.readLocal!(m.localPath, (opts.maxFileSizeMB ?? 50) * 1024 * 1024), sourceHostException: false }
+          : await download(m.sourceUrl)
       if (got.sourceHostException && !exceptionReported) {
         exceptionReported = true
         ctx.report.warning({ code: 'MEDIA_SOURCE_HOST_EXCEPTION', detail: `Media from ${source?.host} was fetched over a local or private address (doc 12.6)` })
