@@ -1,4 +1,4 @@
-import { open, stat } from 'node:fs/promises'
+import { open, type FileHandle } from 'node:fs/promises'
 import { MediaError, SecurityError } from '../security/errors.js'
 import { DumpError } from './sql/dump.js'
 
@@ -30,16 +30,16 @@ export const WPRESS_TABLE_PREFIX = 'SERVMASK_PREFIX_'
 const text = (b: Buffer, from: number, to: number) => b.subarray(from, to).toString('utf8').replace(/\0[\s\S]*$/, '')
 
 export async function indexWpress(file: string): Promise<WpressIndex> {
-  let size: number
+  let fh: FileHandle
   try {
-    size = (await stat(file)).size
+    fh = await open(file, 'r')
   } catch {
     throw new DumpError('DUMP_NOT_FOUND', `Backup not found: ${file}`)
   }
-  const fh = await open(file, 'r')
   const uploads = new Map<string, WpressEntry>()
   let database: WpressEntry | undefined
   try {
+    const size = (await fh.stat()).size
     const h = Buffer.alloc(HEADER)
     let pos = 0
     for (let n = 0; ; n++) {

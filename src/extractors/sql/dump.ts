@@ -1,5 +1,4 @@
-import { createReadStream } from 'node:fs'
-import { open, stat } from 'node:fs/promises'
+import { open, type FileHandle } from 'node:fs/promises'
 import { createGunzip } from 'node:zlib'
 
 // Streaming reader for MySQL dumps (mysqldump, phpMyAdmin, backup plugins). Nothing in the dump is
@@ -38,29 +37,31 @@ export async function* readDump(
   file: string,
   opts: { tables: ReadonlySet<string>; maxBytes?: number; range?: { start: number; length: number } },
 ): AsyncIterable<DumpEvent> {
-  let size: number
+  let fh: FileHandle
   try {
-    const s = await stat(file)
-    if (!s.isFile()) throw new DumpError('DUMP_NOT_FOUND', `${file} is not a file.`)
-    size = opts.range ? opts.range.length : s.size
-  } catch (error) {
-    if (error instanceof DumpError) throw error
+    fh = await open(file, 'r')
+  } catch {
     throw new DumpError('DUMP_NOT_FOUND', `SQL dump not found: ${file}`)
   }
-  const max = opts.maxBytes ?? MAX_DUMP_BYTES
-  if (size > max) throw new DumpError('DUMP_TOO_LARGE', `The dump is ${Math.ceil(size / 1024 ** 2)} MB; the limit is ${Math.floor(max / 1024 ** 2)} MB.`)
-
+  let raw: ReturnType<FileHandle['createReadStream']>
+  let size: number
   const head = Buffer.alloc(2)
-  const fh = await open(file, 'r')
   try {
+    const s = await fh.stat()
+    if (!s.isFile()) throw new DumpError('DUMP_NOT_FOUND', `${file} is not a file.`)
+    size = opts.range ? opts.range.length : s.size
+    const max = opts.maxBytes ?? MAX_DUMP_BYTES
+    if (size > max) throw new DumpError('DUMP_TOO_LARGE', `The dump is ${Math.ceil(size / 1024 ** 2)} MB; the limit is ${Math.floor(max / 1024 ** 2)} MB.`)
     await fh.read(head, 0, Math.min(2, size), opts.range?.start ?? 0)
-  } finally {
+    raw = fh.createReadStream({
+      highWaterMark: 1024 * 1024,
+      ...(opts.range ? { start: opts.range.start, end: opts.range.start + opts.range.length - 1 } : {}),
+    })
+  } catch (error) {
     await fh.close()
+    throw error
   }
-  const raw = createReadStream(file, {
-    highWaterMark: 1024 * 1024,
-    ...(opts.range ? { start: opts.range.start, end: opts.range.start + opts.range.length - 1 } : {}),
-  })
+  const max = opts.maxBytes ?? MAX_DUMP_BYTES
   const gz = head[0] === 0x1f && head[1] === 0x8b
   const stream = gz ? raw.pipe(createGunzip()) : raw
   stream.setEncoding('utf8')

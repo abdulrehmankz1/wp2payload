@@ -1,4 +1,5 @@
-import { lstat, readFile, realpath } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { MediaError, SecurityError } from '../errors.js'
 
@@ -26,8 +27,14 @@ export async function readLocalMedia(uploadsDir: string, relPath: string, maxByt
   if (file !== root && !file.startsWith(root + path.sep)) {
     throw new SecurityError('SEC_PATH_TRAVERSAL', `Refused media path ${JSON.stringify(rel)}: a link in it points outside the uploads folder.`)
   }
-  const st = await lstat(file)
-  if (!st.isFile()) throw new MediaError('MEDIA_404', `Not a regular file in the uploads folder: ${rel}`, 404)
-  if (st.size > maxBytes) throw new SecurityError('SEC_FILE_TOO_LARGE', `Media is ${st.size} bytes, over the ${maxBytes}-byte cap.`)
-  return readFile(file)
+  // O_NOFOLLOW where the platform has it: the resolved path must not have become a link since.
+  const fh = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
+  try {
+    const st = await fh.stat()
+    if (!st.isFile()) throw new MediaError('MEDIA_404', `Not a regular file in the uploads folder: ${rel}`, 404)
+    if (st.size > maxBytes) throw new SecurityError('SEC_FILE_TOO_LARGE', `Media is ${st.size} bytes, over the ${maxBytes}-byte cap.`)
+    return await fh.readFile()
+  } finally {
+    await fh.close()
+  }
 }
