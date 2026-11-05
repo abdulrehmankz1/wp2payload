@@ -46,6 +46,7 @@ const DESCRIPTIONS: Record<string, [string, string]> = {
   SEC_INSECURE_SCHEME: ['insecure media URL', 'insecure media URLs'],
   SEC_TOO_MANY_REDIRECTS: ['media URL with too many redirects', 'media URLs with too many redirects'],
   SEC_FILE_TOO_LARGE: ['file over the size limit', 'files over the size limit'],
+  SEC_PATH_TRAVERSAL: ['media path outside the uploads folder', 'media paths outside the uploads folder'],
 }
 
 const ACTION_WORDS: Record<SecurityFinding['action'], string> = {
@@ -136,8 +137,16 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
     lines.push('  Progress is saved. Fix the cause, then run the same command again to resume.')
   }
 
-  lines.push('', paint(1, 'Security'))
-  const groups = groupFindings(json.security.findings)
+  lines.push('', ...securityLines(json.security.findings, opts.color))
+  lines.push(`Details: ${opts.reportPath}`)
+  return lines
+}
+
+/** The Security block: findings grouped by severity and code, most severe first. */
+export function securityLines(findings: SecurityFinding[], color: boolean): string[] {
+  const paint = (code: number, text: string): string => (color ? `\u001b[${code}m${text}\u001b[0m` : text)
+  const lines = [paint(1, 'Security')]
+  const groups = groupFindings(findings)
   if (groups.length === 0) lines.push('  No findings.')
   const countWidth = Math.max(1, ...groups.map((g) => String(g.count).length))
   for (const g of groups) {
@@ -145,11 +154,15 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
     const head = `${String(g.count).padStart(countWidth)} ${g.severity.padEnd(6)}`
     lines.push(`${paint(style.code, style.mark)} ${paint(style.code, head)}  ${g.text}`)
   }
-  lines.push(`Details: ${opts.reportPath}`)
   return lines
 }
 
-function issueLines(
+/** One line for a group of findings, as the CLI summary shows it ("2 script elements quarantined"). */
+export function describeFindings(code: string, items: SecurityFinding[]): string {
+  return describe(code, items)
+}
+
+export function issueLines(
   label: string,
   issues: Issue[],
   colour: number,

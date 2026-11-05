@@ -192,11 +192,11 @@ describe('formatSummary (AC-B2)', () => {
 
   it('neutralises terminal escapes in report text from WordPress', () => {
     const m = new MemoryReport()
-    m.warning({ code: 'X', detail: 'evil \u001b[2J‮ text' })
+    m.warning({ code: 'X', detail: 'evil \u001b[2J\u202e text' })
     m.finding({ code: 'SEC_EXECUTABLE_UPLOAD', severity: 'high', action: 'rejected', file: 'a\u001b]0;pwn\u0007.php' })
     const r = buildReport(m, { site: 's\u001b[31m', dryRun: false, startedAt: start, finishedAt: start })
     const text = formatSummary(r, { ...opts, verbose: true }).join('\n')
-    expect(text).not.toMatch(/[\u0000-\u0009\u000b-\u001f‮]/)
+    expect(text).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u202e]/)
     expect(clean('a\nb')).toBe('a?b')
   })
 

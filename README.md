@@ -91,6 +91,7 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `init` | Writes `wp2payload.config.ts` and appends `.wp2payload/`, `.env` and backup patterns to `.gitignore`. With `--url`, adds `WP_URL` to `.env`. With `--scaffold`, writes the blog preset collections as new files you own; existing files are never overwritten. Other flags: `--force` (replace `wp2payload.config.ts` only), `--yes` (no questions). Your TypeScript files are never edited. |
 | `doctor` | Checks Node.js, your Payload installation and the WordPress site or export file. Writes nothing. |
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
+| `scan [target]` | Security and content health report of a site, without migrating. Needs no Payload project (see [Scanning a site](#scanning-a-site)). |
 | `report` | Prints the last migration report again (`--json` for the raw file). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
 
@@ -282,6 +283,28 @@ Pages built with Elementor, Divi, WPBakery or Beaver Builder keep their text, im
 links but not their layout; shortcodes stay as text; other post types (such as WooCommerce
 products) are not migrated yet. Each of these is listed in the report, and `doctor` names the
 post types it will skip.
+
+## Scanning a site
+
+`scan` reads a site the way a migration would and reports what it found, without Payload and
+without writing anything but the report. Point it at a site, an export or a backup:
+
+```bash
+npx wp2payload scan https://oldsite.com          # WP_USER and WP_APP_PASSWORD from the environment, if set
+npx wp2payload scan ./export.xml
+npx wp2payload scan ./backup.sql.gz --uploads ./uploads
+npx wp2payload scan ./site.wpress
+npx wp2payload scan                              # the source in wp2payload.config.ts
+```
+
+Every document goes through the same security scan and sanitizer as a migration, and every
+media file through the same download guard and verification (`--no-media` skips them). The
+report covers security findings, page builders, shortcodes, SEO coverage and the post types a
+migration would leave behind. It is written to `.wp2payload/scan.json` and
+`.wp2payload/scan.html`, a self-contained page you can hand to a client: no scripts, and every
+value from the site escaped. `--fail-on-security <level>` exits with code 4 when findings at that
+level exist, for CI. The report is not a malware scan of the server and does not certify that
+the site is clean.
 
 ## Reports and local files
 
