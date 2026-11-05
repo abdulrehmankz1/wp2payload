@@ -14,8 +14,10 @@ docker compose -f tests/fixtures/hacked-site/docker-compose.yml down -v   # full
 ```
 
 The seed also writes the site as a WordPress export to the gitignored
-`tests/fixtures/hacked-site/.cache/export.xml` (`HACKED_WXR_FILE` in `.env`), and the suite runs
-once over the REST source and once over that export (`tests/e2e/hacked-site-*.e2e.test.ts`).
+`tests/fixtures/hacked-site/.cache/export.xml` (`HACKED_WXR_FILE` in `.env`) and as a backup: a
+mysqldump in `backup.sql` and the uploads folder in `uploads/` (`HACKED_SQL_FILE`,
+`HACKED_UPLOADS_DIR`). The suite runs over the REST source, the export and the backup
+(`tests/e2e/hacked-site-*.e2e.test.ts`).
 
 The seed is idempotent: everything it created before is deleted and created again, and the
 `wp2p-hacked` Application Password of `wp2p-editor` is rotated. It writes `HACKED_WP_URL`,
@@ -40,5 +42,6 @@ gate) a missing fixture fails it.
 The media files come from `tests/fixtures/hacked-media`. The must-use plugin in `mu-plugins/`
 lets an attachment report a forced source URL, as an attacker with database access could.
 
-XXE and entity expansion in export files (T12) are covered by `tests/unit/wxr.test.ts`. Zip slip
-(T11) and SQL dump threats (T13) belong to the backup source and are added with it.
+XXE and entity expansion in export files (T12) are covered by `tests/unit/wxr.test.ts`; path
+traversal in .wpress archives (T10, T11) and hostile dumps (comments, triggers, procedures, T13)
+by `tests/unit/wpress.test.ts` and `tests/unit/sql.test.ts`.

@@ -2,7 +2,7 @@
 // Starts and seeds the hacked-site fixture (tests/fixtures/hacked-site, doc 12.14). Idempotent.
 // No npm deps. Never prints the Application Password; it is only written to .env as HACKED_WP_*.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -99,6 +99,16 @@ async function main() {
   writeFileSync(join(CACHE_DIR, 'export.xml'), xml + '\n');
   updateEnv({ HACKED_WXR_FILE: 'tests/fixtures/hacked-site/.cache/export.xml' });
   log('wrote the WXR export to tests/fixtures/hacked-site/.cache/export.xml');
+
+  // And as a backup (SQL dump plus uploads folder), for the SQL source.
+  // mysqldump from the MySQL image itself: the plain output a hosting backup gives.
+  const dump = compose(['exec', '-T', 'db', 'mysqldump', '-uwp2p_hacked', '-pfixture-only-not-a-secret', '--single-transaction', '--no-tablespaces', 'wordpress']).out;
+  if (!/CREATE TABLE `wp_posts`/.test(dump)) throw new Error('wp db export returned no WordPress tables');
+  writeFileSync(join(CACHE_DIR, 'backup.sql'), dump + '\n');
+  rmSync(join(CACHE_DIR, 'uploads'), { recursive: true, force: true });
+  compose(['cp', 'wordpress:/var/www/html/wp-content/uploads', join(CACHE_DIR, 'uploads')]);
+  updateEnv({ HACKED_SQL_FILE: 'tests/fixtures/hacked-site/.cache/backup.sql', HACKED_UPLOADS_DIR: 'tests/fixtures/hacked-site/.cache/uploads' });
+  log('wrote the SQL backup to tests/fixtures/hacked-site/.cache/backup.sql and uploads/');
   log('done');
 }
 
