@@ -107,6 +107,33 @@ describe('runDoctor', () => {
     expect(output()).toMatch(/✖ Export file not found/)
   })
 
+  it('checks a SQL backup and its uploads folder', async () => {
+    await writeConfig(`export default { source: { type: 'sql', file: './db.sql', uploadsDir: './uploads', tablePrefix: 'blog_' } }`)
+    const calls: string[] = []
+    const code = await runDoctor({
+      cwd: root,
+      log,
+      createSqlExtractor: (f, prefix) => {
+        calls.push(`${path.basename(f)} ${prefix}`)
+        return { probe: async () => ({ siteUrl: 'https://old.example', counts: { posts: 2 } }) }
+      },
+    })
+    expect(calls).toEqual(['db.sql blog_'])
+    expect(output()).toMatch(/✔ Backup of https:\/\/old\.example\n\s+2 posts/)
+    expect(output()).toMatch(/✖ Uploads folder not found/)
+    expect(code).toBe(1)
+    await mkdir(path.join(root, 'uploads'))
+    lines = []
+    expect(await runDoctor({ cwd: root, log, createSqlExtractor: () => ({ probe: async () => ({ siteUrl: 'https://old.example', counts: {} }) }) })).toBe(0)
+    expect(output()).toMatch(/✔ Uploads folder \.\/uploads/)
+  })
+
+  it('fails on a .wpress backup that cannot be read', async () => {
+    await writeConfig(`export default { source: { type: 'wpress', file: './site.wpress' } }`)
+    expect(await runDoctor({ cwd: root, log })).toBe(1)
+    expect(output()).toMatch(/✖ Backup not found/)
+  })
+
   it('reports a source failure with its next step and exits 1', async () => {
     await writeConfig(`export default { source: { type: 'rest', url: 'https://example.com' } }`)
     const code = await runDoctor({

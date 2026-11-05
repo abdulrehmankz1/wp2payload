@@ -4,6 +4,8 @@ import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import { checkNodeVersion, checkPayloadInstalled, type CheckResult } from '../doctor/checks.js'
 import { RestError, RestExtractor } from '../extractors/rest/index.js'
+import { openSource } from '../extractors/source.js'
+import { DumpError, SqlExtractor } from '../extractors/sql/index.js'
 import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
 import type { SourceInfo } from '../ir/types.js'
 import { clean } from '../report/summary.js'
@@ -17,6 +19,7 @@ export interface DoctorOptions {
   // Injected in tests so the source check needs no network.
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
   createWxrExtractor?: (file: string) => Pick<WxrExtractor, 'probe'>
+  createSqlExtractor?: (file: string, tablePrefix: string) => Pick<SqlExtractor, 'probe'>
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
@@ -51,12 +54,40 @@ async function checkWxr(file: string, opts: DoctorOptions): Promise<CheckResult[
   }
 }
 
+async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' }>, opts: DoctorOptions): Promise<CheckResult[]> {
+  const cwd = opts.cwd ?? process.cwd()
+  const results: CheckResult[] = []
+  try {
+    const file = path.resolve(cwd, source.file)
+    const info = await (opts.createSqlExtractor ?? ((f, prefix) => new SqlExtractor({ file: f, tablePrefix: prefix })))(file, source.tablePrefix).probe()
+    const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
+    results.push({ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info))
+  } catch (error) {
+    if (!(error instanceof DumpError)) throw error
+    results.push({ status: 'fail', title: error.message })
+  }
+  const uploads = path.resolve(cwd, source.uploadsDir)
+  if (!existsSync(uploads)) results.push({ status: 'fail', title: `Uploads folder not found: ${uploads}`, detail: 'Point source.uploadsDir at wp-content/uploads from the backup.' })
+  else results.push({ status: 'ok', title: `Uploads folder ${source.uploadsDir}` })
+  return results
+}
+
+async function checkWpress(config: ResolvedConfig, opts: DoctorOptions): Promise<CheckResult[]> {
+  try {
+    const info = await (await openSource(config, opts.cwd ?? process.cwd())).extractor.probe()
+    const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
+    return [{ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info)]
+  } catch (error) {
+    if (!(error instanceof DumpError)) throw error
+    return [{ status: 'fail', title: error.message }]
+  }
+}
+
 async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise<CheckResult[]> {
   const { source } = config
   if (source.type === 'wxr') return checkWxr(path.resolve(opts.cwd ?? process.cwd(), source.file), opts)
-  if (source.type !== 'rest') {
-    return [{ status: 'warn', title: 'Source type "sql" is not supported yet', detail: 'Use the REST source (a live site) or a WXR export file.' }]
-  }
+  if (source.type === 'sql') return checkSql(source, opts)
+  if (source.type === 'wpress') return checkWpress(config, opts)
   try {
     const extractor = (opts.createExtractor ?? defaultExtractor)(source)
     const info = await extractor.probe()

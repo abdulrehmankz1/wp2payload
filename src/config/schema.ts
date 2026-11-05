@@ -40,8 +40,14 @@ const sqlSource = z.strictObject({
   tablePrefix: z.string().min(1, 'expected a non-empty table prefix').default('wp_'),
 })
 
-const source = z.discriminatedUnion('type', [restSource, wxrSource, sqlSource], {
-  error: "expected source.type to be one of 'rest', 'wxr', 'sql'",
+// An All-in-One WP Migration backup: database and uploads are read from the archive in place.
+const wpressSource = z.strictObject({
+  type: z.literal('wpress'),
+  file: nonEmpty('a path to the .wpress backup'),
+})
+
+const source = z.discriminatedUnion('type', [restSource, wxrSource, sqlSource, wpressSource], {
+  error: "expected source.type to be one of 'rest', 'wxr', 'sql', 'wpress'",
 })
 
 const collection = z.strictObject({

@@ -36,6 +36,8 @@ export interface PipelineOptions {
    * allowlisted: https, and never a private address.
    */
   trustSiteHost?: boolean
+  /** Backup sources: reads local media (from the uploads folder or the backup archive). */
+  readLocalMedia?: (localPath: string, maxBytes: number) => Promise<Buffer>
   dryRun: boolean
   /** Phases or document types to run; empty means all. */
   only?: readonly string[]
@@ -150,6 +152,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
         root: o.root,
         ...(o.trustSiteHost === false ? {} : { sourceUrl: siteUrl }),
         allowedHosts: o.trustSiteHost === false ? [...m.allowedHosts, new URL(siteUrl).hostname] : m.allowedHosts,
+        ...(o.readLocalMedia ? { readLocal: o.readLocalMedia } : {}),
         allowSvg: o.allowSvg ?? false,
         reencode: m.reencode,
         maxFileSizeMB: m.maxFileSizeMB,
