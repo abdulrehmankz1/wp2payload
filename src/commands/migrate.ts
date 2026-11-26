@@ -223,8 +223,14 @@ export function inviteCheck(
       ? { status: 'warn', title: '--invite-users has no effect', detail: `Authors are not mapped into an auth collection${to ? ` (${to} has no auth)` : ''}, so no accounts are created.` }
       : undefined
   }
+  // A warning, not ok: on a hacked site the attacker's user wrote the spam posts and gets an account too.
+  const review = 'These accounts can log in. Every one created is listed in the report as AUTHOR_ACCOUNT_CREATED; check each is a real person before go-live.'
   if (!inviteUsers) {
-    return { status: 'ok', title: `Authors become accounts in ${to}`, detail: 'Each new account gets a random password. Add --invite-users to email a password-set link, or users can use "Forgot password".' }
+    return {
+      status: 'warn',
+      title: `Authors become login accounts in ${to}`,
+      detail: `${review} Each new account gets a random password. Add --invite-users to email a password-set link, or users can use "Forgot password".`,
+    }
   }
   if (!payload.config.email) {
     return {
@@ -233,7 +239,11 @@ export function inviteCheck(
       detail: 'Without one Payload only logs emails. Add email: nodemailerAdapter(...) or resendAdapter(...) to payload.config.ts, or run without --invite-users.',
     }
   }
-  return { status: 'ok', title: `New accounts in ${to} get a password-set email`, detail: 'Only accounts created by this run; re-runs send nothing.' }
+  return {
+    status: 'warn',
+    title: `Authors become login accounts in ${to}, each emailed a password-set link`,
+    detail: `${review} Only accounts created by this run are emailed; re-runs send nothing.`,
+  }
 }
 
 async function ask(question: string): Promise<boolean> {

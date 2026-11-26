@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { renameWithFallback, STATE_DIR } from '../state/store.js'
@@ -33,11 +34,21 @@ export async function writeSecurityReport(root: string, json: ReportJson, opts: 
   return SECURITY_HTML_PATH
 }
 
-/** Writes a file through a temporary sibling and a rename, so a reader never sees half of it. */
+/**
+ * Writes a file through a temporary sibling and a rename, so a reader never sees half of it. The
+ * temporary name is random and opened with `wx`, so a file or symlink planted under it is never
+ * followed or overwritten: the write fails instead.
+ */
 export async function writeAtomic(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
-  await writeFile(tmp, content, 'utf8')
+  const tmp = `${file}.${randomBytes(12).toString('hex')}.tmp`
+  try {
+    await writeFile(tmp, content, { encoding: 'utf8', flag: 'wx' })
+  } catch (error) {
+    // EEXIST: the name is not ours, so leave it alone. Otherwise remove what was partly written.
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') await unlink(tmp).catch(() => {})
+    throw error
+  }
   try {
     await renameWithFallback(tmp, file)
   } catch (error) {

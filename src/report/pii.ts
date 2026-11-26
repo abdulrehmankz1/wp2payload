@@ -4,8 +4,11 @@
 
 export const EMAIL_PLACEHOLDER = '[email]'
 
-// Bounded repeats (RFC 5321 limits) keep the scan linear on long text from WordPress.
-const EMAIL = /[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.){1,8}([A-Za-z]{2,63})\b/g
+// Bounded repeats (RFC 5321 limits) keep the scan linear on long text from WordPress. Letters,
+// digits and combining marks of any script count (RFC 6531 addresses such as jörg@bücher.de). The
+// closing lookahead replaces `\b`, which knows only ASCII word characters even with the `u` flag.
+const EMAIL =
+  /[\p{L}\p{M}\p{N}.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[\p{L}\p{N}](?:[\p{L}\p{M}\p{N}-]{0,61}[\p{L}\p{M}\p{N}])?\.){1,8}(\p{L}[\p{L}\p{M}]{1,62})(?![\p{L}\p{M}\p{N}_])/gu
 
 // `logo@2x.png` is a retina image name, not an address. None of these is a top-level domain.
 const FILE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'bmp', 'tif', 'tiff', 'ico', 'heic', 'pdf', 'mp3', 'mp4', 'webm', 'ogg', 'wav', 'm4a'])

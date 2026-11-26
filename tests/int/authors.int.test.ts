@@ -210,15 +210,45 @@ describe('loadAuthors into an auth collection', () => {
     const res = await loadAuthors(a.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '5-ann@example.com' }], { invite: true })
     expect(res.invitations).toEqual({ sent: 0, failed: 1 })
     expect(a.report.summary['authors']).toEqual({ created: 1 })
-    expect(a.report.warnings).toHaveLength(1)
-    expect(a.report.warnings[0]).toMatchObject({ code: 'AUTHOR_INVITE_FAILED', doc: 'author:1' })
-    expect(a.report.warnings[0]!.detail).toContain('SMTP 550')
-    expect(a.report.warnings[0]!.detail).not.toContain('@')
+    expect(a.report.warnings.map((w) => w.code)).toEqual(['AUTHOR_ACCOUNT_CREATED', 'AUTHOR_INVITE_FAILED'])
+    const failed = a.report.warnings[1]!
+    expect(failed).toMatchObject({ code: 'AUTHOR_INVITE_FAILED', doc: 'author:1' })
+    expect(failed.detail).toContain('SMTP 550')
+    expect(failed.detail).not.toContain('@')
 
     failFor.add('6-ann@example.com')
     const b = ctxFor('https://users6.test', 'members')
     await loadAuthors(b.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '6-ann@example.com' }], { invite: true, includePii: true })
-    expect(b.report.warnings[0]!.detail).toContain('6-ann@example.com')
+    expect(b.report.warnings.find((w) => w.code === 'AUTHOR_INVITE_FAILED')!.detail).toContain('6-ann@example.com')
+  })
+
+  // SEC-01: on a hacked site the attacker's user wrote the spam and gets an account; each one is listed for review.
+  it('reports every account it creates by wpId and slug, never the email unless includePii', async () => {
+    reset()
+    const a = ctxFor('https://users8.test', 'members')
+    await loadAuthors(a.ctx, [...people('8-'), { wpId: 3, slug: 'seo-admin', displayName: 'admin', email: 'x@spam.example' }])
+    const created = a.report.warnings.filter((w) => w.code === 'AUTHOR_ACCOUNT_CREATED')
+    expect(created.map((w) => w.doc)).toEqual(['author:1', 'author:2', 'author:3'])
+    expect(created[2]!.detail).toBe('User 3 (slug "seo-admin") got a login account in members. Check it is a real person before go-live')
+    expect(JSON.stringify(a.report.warnings)).not.toContain('@')
+
+    // A re-run updates and reports nothing new.
+    const b = ctxFor('https://users8.test', 'members')
+    await loadAuthors(b.ctx, people('8-'))
+    expect(b.report.warnings).toEqual([])
+
+    // A dry run lists what it would create; --include-pii adds the address.
+    const d = ctxFor('https://users9.test', 'members', true)
+    await loadAuthors(d.ctx, people('9-'), { includePii: true })
+    expect(d.report.warnings.map((w) => w.code)).toEqual(['AUTHOR_ACCOUNT_CREATED', 'AUTHOR_ACCOUNT_CREATED'])
+    expect(d.report.warnings[1]!.detail).toBe('User 2 (slug "bob") (9-bob@example.com) would get a login account in members. Check it is a real person before go-live')
+  })
+
+  it('a non-auth collection creates no accounts and reports none', async () => {
+    const a = ctxFor('https://users10.test', 'authors' as never)
+    await loadAuthors(a.ctx, people('10-'))
+    expect(a.report.summary['authors']).toEqual({ created: 2 })
+    expect(a.report.warnings).toEqual([])
   })
 
   it('a collection with verify gets no verification email, and fields it lacks are dropped', async () => {
