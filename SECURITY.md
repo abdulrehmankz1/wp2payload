@@ -22,7 +22,7 @@ the problem (a post's HTML, a media file, a REST response). Use inert samples, s
 ## Supported versions
 
 The latest minor release receives security fixes. While wp2payload is in 0.x, that is the latest
-0.0.x release on npm.
+0.x release on npm.
 
 ## Scope
 

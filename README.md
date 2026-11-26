@@ -115,7 +115,7 @@ folder above that has `wp2payload.config.ts`, without going past your project's 
 | `--fail-on-security <level>` | Exit with code 4 when findings at `low`, `medium` or `high` exist |
 | `--allow-svg` | Accept SVG uploads after a strict check |
 | `--allow-embed-host <host>` | Trust another iframe host (YouTube and Vimeo are trusted by default) |
-| `--invite-users` | When authors map into an auth collection, email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
+| `--invite-users` | When authors map into an auth collection (with `authors.createAccounts: true`), email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
 | `--include-pii` | Allow author emails in the report; by default the report and the output hold no email addresses |
 | `--yes` | Skip the first-run confirmation (for CI) |
 | `--verbose` | List every warning and skipped phase |

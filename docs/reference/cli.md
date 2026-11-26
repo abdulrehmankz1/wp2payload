@@ -78,7 +78,7 @@ then redirects. Every write is an upsert by `wpMeta.site` and `wpMeta.wpId`
 | `--fail-on-security <level>` | off | Exit with code 4 when findings at or above `low`, `medium` or `high` exist |
 | `--allow-svg` | off | Accept SVG uploads that pass a strict check ([ADR-0010](../adr/0010-svg-rejected.md)) |
 | `--allow-embed-host <host>` | YouTube, Vimeo | Trust another iframe host. Repeatable, or comma-separated |
-| `--invite-users` | off | When authors map into an auth collection, send Payload's forgot-password email to each account the run created. Needs an email adapter in your Payload config |
+| `--invite-users` | off | When authors map into an auth collection, send Payload's forgot-password email to each account the run created. Needs `authors.createAccounts: true` in the config and an email adapter in your Payload config |
 | `--include-pii` | off | Allow author emails in the report. By default the report and the output hold none |
 | `--yes` | off | Skip the first-run confirmation (for CI) |
 | `--verbose` | off | List every warning and skipped phase |
@@ -113,6 +113,7 @@ when set.
 | --- | --- | --- |
 | `--config <path>` | `wp2payload.config.ts` | Config file, when no target is given |
 | `--uploads <path>` | `uploads` next to the dump | For a SQL dump: the uploads folder, or an uploads archive. Repeatable. An UpdraftPlus `-db.gz` finds its `-uploads*.zip` files next to it |
+| `--table-prefix <prefix>` | detected | For a SQL dump or backup archive: the table prefix, when the dump holds several sites |
 | `--no-media` | media checked | Do not download or check media files |
 | `--limit <n>` | none | Scan only the first n documents |
 | `--concurrency <n>` | 4 | Parallel media checks |

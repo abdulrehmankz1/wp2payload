@@ -94,7 +94,7 @@ A SQL dump with the uploads. See [Migrating from a backup](../guides/migrating-f
 | `file` | string | required | `.sql`, `.sql.gz` or an UpdraftPlus `-db.gz` |
 | `uploadsDir` | string | | The `wp-content/uploads` folder |
 | `uploads` | string or string[] | | Uploads archive(s) instead of a folder, such as UpdraftPlus `-uploads.zip` files, split ones included |
-| `tablePrefix` | string | `'wp_'` | Table prefix used in the dump. `doctor` names the prefix the dump uses when it differs |
+| `tablePrefix` | string | detected | Table prefix used in the dump (`[A-Za-z0-9_]`, up to 64). When unset, it is detected from the dump; see [Table prefix](../guides/migrating-from-a-backup.md#table-prefix) |
 
 Set exactly one of `uploadsDir` and `uploads`.
 
@@ -116,7 +116,7 @@ One zip or tar backup with the dump and `wp-content/uploads` inside, such as a D
 | --- | --- | --- | --- |
 | `type` | `'archive'` | | |
 | `file` | string | required | `.zip`, `.tar.gz`, `.tgz` or `.tar` |
-| `tablePrefix` | string | `'wp_'` | Table prefix used in the dump |
+| `tablePrefix` | string | detected | Table prefix used in the dump. When unset, it is detected from `wp-config.php` in the archive or from the dump |
 
 ## collections
 
@@ -150,7 +150,16 @@ own collections, copy the field from the README or import `wpMetaField` from `wp
 `migrate` checks every mapped collection before writing and says exactly what is missing.
 
 When `author` maps to an auth collection (one with `auth`), each user becomes a login account
-with a random password. See `--invite-users` in the [CLI reference](cli.md#migrate).
+with a random password. This needs an explicit opt-in, because on a hacked site the attacker's
+user may have written the spam posts:
+
+```ts
+authors: { createAccounts: true }
+```
+
+Without it, `migrate` and `doctor` stop with exit code 2 before anything is written. The opt-in
+is recorded in the report, and every account created is listed as `AUTHOR_ACCOUNT_CREATED`. See
+`--invite-users` in the [CLI reference](cli.md#migrate).
 
 ## statuses
 

@@ -118,9 +118,16 @@ is removed when the command ends, also on an error or Ctrl+C.
 
 ### Table prefix
 
-The default table prefix is `wp_`. When the dump uses another one, `doctor` names it; set
-`tablePrefix` on the `sql` or `archive` source. A `.wpress` file needs nothing: wp2payload knows
-the placeholder prefix it uses.
+You usually don't need to set the table prefix. When `tablePrefix` is unset, wp2payload finds it:
+
+1. From `wp-config.php` inside a zip or tar backup, read as text and never run. Only a plain
+   `$table_prefix = '...';` line counts, and only if the dump really has those tables.
+2. Otherwise from the dump: the prefix that has `posts`, `postmeta` and `options` tables.
+
+If the dump holds more than one WordPress site (or a multisite network), the run stops with
+`DUMP_MULTIPLE_SITES` and lists the prefixes; set `tablePrefix` on the `sql` or `archive` source,
+or pass `scan --table-prefix`. `doctor` prints the prefix it found. A `.wpress` file needs
+nothing: wp2payload knows the placeholder prefix it uses.
 
 ## What a backup gives, and what it does not
 
