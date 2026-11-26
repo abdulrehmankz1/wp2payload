@@ -21,6 +21,33 @@ describe('redactEmails', () => {
     expect(performance.now() - t).toBeLessThan(1000)
   })
 
+  it('replaces addresses with non-ASCII letters whole, in the local part and the domain', () => {
+    expect(redactEmails('user@bücher.de')).toBe('[email]')
+    expect(redactEmails('jörg@x.de')).toBe('[email]')
+    expect(redactEmails('mail jörg@x.de, then user@bücher.de.')).toBe('mail [email], then [email].')
+    expect(redactEmails('иван@пример.рф wrote')).toBe('[email] wrote')
+    // NFD: "ö" as "o" plus a combining diaeresis.
+    expect(redactEmails('jörg@bücher.de')).toBe('[email]')
+    expect(redactEmails('uploads/bücher@2x.png')).toBe('uploads/bücher@2x.png')
+    expect(withoutEmails({ d: 'from user@bücher.de' })).toEqual({ d: 'from [email]' })
+  })
+
+  it('stays fast on about 1 MB of adversarial text, ASCII or not', () => {
+    const inputs = [
+      'ä'.repeat(500_000) + '@' + 'ü'.repeat(500_000),
+      'ä@'.repeat(500_000),
+      'a@' + 'ü.'.repeat(500_000),
+      'a@' + 'ü-'.repeat(500_000),
+      ('x@' + 'é'.repeat(70) + '.').repeat(13_000),
+      ('ab@c' + 'd.'.repeat(9) + '1 ').repeat(40_000),
+    ]
+    for (const input of inputs) {
+      const t = performance.now()
+      redactEmails(input)
+      expect(performance.now() - t).toBeLessThan(1000)
+    }
+  })
+
   it('withoutEmails copies a report with every string cleaned', () => {
     const input = { warnings: [{ code: 'X', detail: 'ann@example.com' }], n: 3, ok: true, none: null }
     const out = withoutEmails(input)
