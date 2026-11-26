@@ -33,7 +33,7 @@ Vitest runs three projects (`vitest.config.ts`):
 | Project | Files | Needs |
 | --- | --- | --- |
 | `unit` | `tests/unit/**/*.test.ts` | Nothing |
-| `int` | `tests/int/**/*.int.test.ts` | Nothing: a real Payload instance on SQLite, started by the test |
+| `int` | `tests/int/**/*.int.test.ts` | Nothing: a real Payload instance on SQLite (or MongoDB, see below), started by the test |
 | `e2e` | `tests/e2e/**/*.e2e.test.ts` | The hacked-site fixture (Docker). Skipped when it is not seeded |
 
 | Script | What it runs |
@@ -85,8 +85,12 @@ instead, so CI cannot pass by skipping them.
 | `PAYLOAD_SECRET` | any string for local use | Running the CLI inside a Payload project |
 | `DATABASE_URI` | `file:./tmp/test.db` | Running the CLI inside a Payload project |
 | `NO_COLOR` | `1` | Turns off coloured output |
+| `WP2P_TEST_DB` | `sqlite` (default) or `mongodb` | Which database the integration tests use |
+| `WP2P_TEST_MONGO_URL` | `mongodb://127.0.0.1:27017/?replicaSet=rs0` | MongoDB for `WP2P_TEST_DB=mongodb`. Each test file gets its own database, dropped afterwards. A single-node replica set exercises transactions, as in CI |
 
-The integration tests start their own Payload with SQLite and do not read `DATABASE_URI`.
+The integration tests start their own Payload (SQLite unless `WP2P_TEST_DB=mongodb`) and do not
+read `DATABASE_URI`. CI runs them on both, and a weekly job runs them against the latest Payload
+release.
 
 ## Branches
 
