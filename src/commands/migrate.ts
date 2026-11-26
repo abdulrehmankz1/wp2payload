@@ -17,7 +17,7 @@ import { preflight } from '../payload/preflight.js'
 import { exitCode } from '../report/exit.js'
 import { clean, formatSummary } from '../report/summary.js'
 import type { ReportJson, Severity } from '../report/types.js'
-import { writeReport } from '../report/write.js'
+import { writeReport, writeSecurityReport } from '../report/write.js'
 import { colorEnabled, formatLine } from '../ui/output.js'
 
 export interface MigrateOptions {
@@ -40,6 +40,8 @@ export interface MigrateOptions {
   includePii?: boolean
   yes?: boolean
   verbose?: boolean
+  /** wp2payload version, shown in the HTML security report. */
+  version?: string
   env?: Env
   log?: (line: string) => void
   /** Interactive confirmation; defaults to a readline prompt when stdin is a TTY. */
@@ -156,7 +158,9 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
       })
 
     const finish = async (json: ReportJson) => {
-      const reportPath = await writeReport(cwd, json)
+      await writeReport(cwd, json)
+      // Doc 12.11: the security block points at the HTML report, the client deliverable.
+      const reportPath = await writeSecurityReport(cwd, json, opts.version ? { version: opts.version } : {})
       for (const line of formatSummary(json, { color, reportPath, verbose: opts.verbose === true })) log(line)
       return exitCode({ report: json, strict: opts.strict === true, ...(opts.failOnSecurity ? { failOnSecurity: opts.failOnSecurity } : {}) })
     }

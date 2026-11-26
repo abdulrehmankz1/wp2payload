@@ -1,6 +1,7 @@
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { renameWithFallback, STATE_DIR } from '../state/store.js'
+import { renderSecurityReportHtml, SECURITY_HTML, SECURITY_HTML_PATH } from './security-html.js'
 import type { ReportJson } from './types.js'
 
 export const REPORT_FILE = 'report.json'
@@ -22,17 +23,27 @@ export class ReportCorruptError extends Error {
 
 /** Writes `<root>/.wp2payload/report.json` atomically. Returns the path relative to root. */
 export async function writeReport(root: string, json: ReportJson): Promise<string> {
-  const file = path.join(root, STATE_DIR, REPORT_FILE)
+  await writeAtomic(path.join(root, STATE_DIR, REPORT_FILE), JSON.stringify(json, null, 2) + '\n')
+  return REPORT_PATH
+}
+
+/** Writes `<root>/.wp2payload/security-report.html` atomically. Returns the path relative to root. */
+export async function writeSecurityReport(root: string, json: ReportJson, opts: { version?: string } = {}): Promise<string> {
+  await writeAtomic(path.join(root, STATE_DIR, SECURITY_HTML), renderSecurityReportHtml(json, opts))
+  return SECURITY_HTML_PATH
+}
+
+/** Writes a file through a temporary sibling and a rename, so a reader never sees half of it. */
+export async function writeAtomic(file: string, content: string): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true })
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
-  await writeFile(tmp, JSON.stringify(json, null, 2) + '\n', 'utf8')
+  await writeFile(tmp, content, 'utf8')
   try {
     await renameWithFallback(tmp, file)
   } catch (error) {
     await unlink(tmp).catch(() => {})
     throw error
   }
-  return REPORT_PATH
 }
 
 /** The last report, or undefined when none exists. Throws ReportCorruptError on bad content. */
