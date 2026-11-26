@@ -1,6 +1,6 @@
 # Report codes
 
-Every warning, error and security finding in `.wp2payload/report.json` carries one of these codes. Codes are stable: once released, a code keeps its meaning. New codes may be added.
+Every warning, error and security finding in `.wp2payload/report.json` (and in `.wp2payload/security-report.html`, the same report as HTML) carries one of these codes. Codes are stable: once released, a code keeps its meaning. New codes may be added.
 
 ## Security findings
 

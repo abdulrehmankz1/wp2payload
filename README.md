@@ -93,7 +93,7 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
 | `scan [target]` | Security and content health report of a site, without migrating. Needs no Payload project (see [Scanning a site](#scanning-a-site)). |
 | `review` | Goes through quarantined items to approve or reject them; approvals apply on the next run (see [Reviewing quarantine](#reviewing-quarantine)). |
-| `report` | Prints the last migration report again (`--json` for the raw file). |
+| `report` | Prints the last migration report again (`--json` for the raw file, `--html [path]` to export the HTML security report). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
 
 Run commands from your project folder or any folder inside it: wp2payload uses the nearest
@@ -343,6 +343,17 @@ git:
 
 - `report.json`: counts, warnings, errors, redirects and security findings. Every code
   is described in [`docs/reference/codes.md`](docs/reference/codes.md).
+- `security-report.html`: the same run as a page you can hand to a client: what was found
+  on the old site and what was kept out of the new one. It has findings by severity, each
+  finding with its code, document or file, action and quarantine path, and a short run
+  summary. Every `migrate` writes it, including dry runs and runs that stopped. The page is
+  self-contained and inert: no scripts, no links, nothing loaded from elsewhere, and its
+  Content-Security-Policy allows only its own stylesheet. Every value from the site is
+  escaped and long values are shortened. Email addresses are never shown.
+  `wp2payload report --html` writes it again from the last `report.json`, and
+  `wp2payload report --html client/report.html` writes it somewhere else. The path is
+  relative to where you run the command, and it never overwrites a `.json` file.
+- `scan.json` and `scan.html`: the last `scan` (see [Scanning a site](#scanning-a-site)).
 - `quarantine/`: removed fragments and rejected files, saved as inert text for review.
 - `state.json`: a cache of WordPress to Payload IDs. Deleting it loses nothing,
   because the database is the source of truth.

@@ -87,6 +87,7 @@ program
     const { runMigrate } = await import('./commands/migrate.js')
     process.exitCode = await runMigrate({
       cwd: root,
+      version,
       ...configAt(opts.config),
       dryRun: opts.dryRun === true,
       ...(opts.only ? { only: opts.only } : {}),
@@ -170,11 +171,14 @@ program
 
 program
   .command('report')
-  .description('Print the last migration report again')
+  .description('Print the last migration report again, or export it as HTML')
   .option('--json', 'print report.json instead of the summary')
+  .option('--html [path]', 'write the HTML security report (default: .wp2payload/security-report.html)')
   .option('--verbose', 'list every warning and error')
-  .action(async (opts: { json?: boolean; verbose?: boolean }) => {
-    process.exitCode = await runReport({ cwd: root, json: opts.json === true, verbose: opts.verbose === true })
+  .action(async (opts: { json?: boolean; html?: boolean | string; verbose?: boolean }) => {
+    // A path is given relative to where the user typed it, like --config.
+    const html = typeof opts.html === 'string' ? path.resolve(here, opts.html) : opts.html === true
+    process.exitCode = await runReport({ cwd: root, json: opts.json === true, html, verbose: opts.verbose === true, version })
   })
 
 program

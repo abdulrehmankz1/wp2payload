@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -119,6 +119,40 @@ describe('runMigrate', () => {
       delete process.env['T_PASS']
       await rm(authed, { recursive: true, force: true })
     }
+  })
+
+  it('writes the HTML security report on every run and points the security block at it (doc 12.11)', async () => {
+    const html = path.join(cwd, '.wp2payload', 'security-report.html')
+    await rm(html, { force: true })
+    const hostile = post(4, '<p>Hi</p><script>alert(1)</script>')
+    const h = harness([hostile], { dryRun: true, version: '7.7.7' })
+    expect(await runMigrate(h.opts)).toBe(0)
+    expect(h.lines.at(-1)).toBe('Details: .wp2payload/security-report.html')
+    const page = await readFile(html, 'utf8')
+    expect(page).toContain('Dry run, nothing was written')
+    expect(page).toContain('wp2payload 7.7.7')
+    expect(page).toContain('<code>SEC_SCRIPT_TAG</code>')
+    expect(page).not.toMatch(/<script/i)
+    // The site URL from probe() carries an OSC 52 escape: it never reaches the page as a control character.
+    expect(page).not.toContain('\u001b')
+  })
+
+  it('writes the HTML report when the run fails (RUN_FAILED)', async () => {
+    const html = path.join(cwd, '.wp2payload', 'security-report.html')
+    await rm(html, { force: true })
+    const h = harness([post(1)], { dryRun: true })
+    const failing: Extractor = {
+      ...h.opts.createExtractor!({} as never),
+      documents: async function* () {
+        throw new Error('connection reset')
+      },
+    }
+    const code = await runMigrate({ ...h.opts, createExtractor: () => failing })
+    expect(code).not.toBe(0)
+    expect(h.lines.at(-1)).toBe('Details: .wp2payload/security-report.html')
+    const page = await readFile(html, 'utf8')
+    expect(page).toContain('Migration stopped early')
+    expect(page).toContain('<code>RUN_FAILED</code>')
   })
 
   it('rejects an unknown --only value with exit 2 before connecting', async () => {
