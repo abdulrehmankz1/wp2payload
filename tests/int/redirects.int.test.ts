@@ -1,15 +1,16 @@
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { redirectsPlugin } from '@payloadcms/plugin-redirects'
 import { buildConfig, getPayload, type Payload } from 'payload'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { loadRedirects, type RedirectsOptions } from '../../src/loaders/redirects.js'
 import type { LoaderContext, RedirectSource } from '../../src/loaders/types.js'
 import { MemoryReport } from '../../src/report/types.js'
+import { waitForDatabase } from '../../src/payload/ready.js'
+import { closeTestPayload, testDatabase } from './db.js'
 
-// Real Payload 3.92 + SQLite with @payloadcms/plugin-redirects (spec 06 AC-B2, AC-B4).
+// Real Payload 3.92 (SQLite or MongoDB, see db.ts) with @payloadcms/plugin-redirects (spec 06 AC-B2, AC-B4).
 
 const SITE = 'https://example.test'
 
@@ -24,7 +25,7 @@ async function start(plugin: Parameters<typeof redirectsPlugin>[0]): Promise<Ins
   const config = buildConfig({
     secret: 'test-secret-not-real',
     telemetry: false,
-    db: sqliteAdapter({ client: { url: `file:${path.join(dir, 'test.db').replace(/\\/g, '/')}` }, push: true }),
+    db: testDatabase(dir),
     collections: [
       { slug: 'posts', fields: [{ name: 'title', type: 'text' }] },
       { slug: 'pages', fields: [{ name: 'title', type: 'text' }] },
@@ -34,18 +35,11 @@ async function start(plugin: Parameters<typeof redirectsPlugin>[0]): Promise<Ins
     logger: { options: { level: 'error' } },
   })
   const payload = await getPayload({ config, key: dir })
+  await waitForDatabase(payload)
   return {
     payload,
     dir,
-    async close() {
-      await payload.db.destroy?.()
-      ;(payload.db as { client?: { close?: () => void } }).client?.close?.()
-      try {
-        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error
-      }
-    },
+    close: () => closeTestPayload(payload, dir),
   }
 }
 

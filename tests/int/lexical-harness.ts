@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { BlocksFeature, LinkFeature, lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig, getPayload, type Payload } from 'payload'
+import { waitForDatabase } from '../../src/payload/ready.js'
+import { closeTestPayload, testDatabase } from './db.js'
 
 // Real Payload with a lexicalEditor() rich text field (default features + embed and wpRawHtml
 // blocks), so converter output is validated by Payload itself. Pattern from harness.ts.
@@ -34,7 +35,7 @@ export async function startLexicalPayload(): Promise<LexicalTestPayload> {
   const config = buildConfig({
     secret: 'test-secret-not-real',
     telemetry: false,
-    db: sqliteAdapter({ client: { url: `file:${path.join(dir, 'test.db').replace(/\\/g, '/')}` }, push: true }),
+    db: testDatabase(dir),
     editor: lexicalEditor(),
     collections: [
       { slug: 'media', upload: { staticDir: path.join(dir, 'media') }, fields: [{ name: 'alt', type: 'text' }] },
@@ -71,17 +72,10 @@ export async function startLexicalPayload(): Promise<LexicalTestPayload> {
     logger: { options: { level: 'error' } },
   })
   const payload = await getPayload({ config, key: dir })
+  await waitForDatabase(payload)
   return {
     payload,
     dir,
-    async close() {
-      await payload.db.destroy?.()
-      ;(payload.db as { client?: { close?: () => void } }).client?.close?.()
-      try {
-        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error
-      }
-    },
+    close: () => closeTestPayload(payload, dir),
   }
 }

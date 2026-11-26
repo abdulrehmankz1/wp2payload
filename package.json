@@ -73,6 +73,7 @@
     }
   },
   "devDependencies": {
+    "@payloadcms/db-mongodb": "3.93.0",
     "@payloadcms/db-sqlite": "3.93.0",
     "@payloadcms/plugin-redirects": "3.93.0",
     "@payloadcms/richtext-lexical": "3.93.0",

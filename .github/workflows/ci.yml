@@ -31,6 +31,41 @@ jobs:
       - run: pnpm build
       - run: pnpm smoke
 
+  # Section 2.11 "CI matrix: SQLite and MongoDB". The test job above covers SQLite; this runs the
+  # same integration suite on MongoDB. A single-node replica set, because the Payload adapter
+  # only uses transactions on one (the setup users get on Atlas). A plain `services:` container
+  # cannot be started with --replSet, so the pinned image is run directly.
+  mongodb:
+    name: Integration (MongoDB)
+    runs-on: ubuntu-24.04
+    env:
+      MONGO_IMAGE: mongo:8.0.38@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01
+      WP2P_TEST_DB: mongodb
+      WP2P_TEST_MONGO_URL: mongodb://127.0.0.1:27017/?replicaSet=rs0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Start MongoDB (single-node replica set)
+        run: |
+          docker run --detach --name mongo --publish 127.0.0.1:27017:27017 "$MONGO_IMAGE" --replSet rs0 --bind_ip_all
+          for _ in $(seq 1 60); do
+            docker exec mongo mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' > /dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
+          docker exec mongo mongosh --quiet --eval 'for (let i = 0; !db.hello().isWritablePrimary; i++) { if (i > 120) quit(1); sleep(500) }'
+      - run: pnpm test:int
+      - name: Stop MongoDB
+        if: always()
+        run: docker rm --force mongo
+
   # Section 2.11 "Install": the packed tarball installs and runs in a clean folder
   # without lifecycle scripts, the way users will get it.
   install:

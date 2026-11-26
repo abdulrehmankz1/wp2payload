@@ -14,6 +14,7 @@ import { upsertByWpMeta, type PayloadId } from '../../src/loaders/wpmeta.js'
 import { MemoryReport } from '../../src/report/types.js'
 import { bootPayload, type BootedPayload } from '../../src/payload/boot.js'
 import { preflight } from '../../src/payload/preflight.js'
+import { mongoUrl, TEST_DB } from './db.js'
 
 // AC-A3: the files `init --scaffold` writes boot in a real Payload 3.92 project and pass preflight
 // with the default config. The project sits in the repo's gitignored .tmp/ so `payload` and the
@@ -24,7 +25,13 @@ const repoTmp = path.join(repoRoot, '.tmp')
 const ENV_KEYS = ['PAYLOAD_SECRET', 'DATABASE_URI', 'DISABLE_PAYLOAD_HMR', '__NEXT_PROCESSED_ENV'] as const
 const posix = (p: string) => p.split(path.sep).join('/')
 
-const PAYLOAD_CONFIG = `import { sqliteAdapter } from '@payloadcms/db-sqlite'
+// The adapter follows WP2P_TEST_DB (see db.ts), so the scaffolded preset is checked on both databases.
+const ADAPTER =
+  TEST_DB === 'mongodb'
+    ? { from: "import { mongooseAdapter } from '@payloadcms/db-mongodb'", db: "mongooseAdapter({ url: process.env.DATABASE_URI || '' })" }
+    : { from: "import { sqliteAdapter } from '@payloadcms/db-sqlite'", db: "sqliteAdapter({ client: { url: process.env.DATABASE_URI || '' }, push: true })" }
+
+const PAYLOAD_CONFIG = `${ADAPTER.from}
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig } from 'payload'
 import { wp2payloadCollections } from './collections/wp2payload'
@@ -33,7 +40,7 @@ export default buildConfig({
   secret: process.env.PAYLOAD_SECRET || '',
   telemetry: false,
   editor: lexicalEditor(),
-  db: sqliteAdapter({ client: { url: process.env.DATABASE_URI || '' }, push: true }),
+  db: ${ADAPTER.db},
   collections: [...wp2payloadCollections],
   logger: { options: { level: 'error' } },
 })
@@ -64,12 +71,19 @@ beforeAll(async () => {
   expect(await runInit({ cwd: projectDir, scaffold: true, yes: true, log: (l) => lines.push(l) })).toBe(0)
   await writeFile(path.join(projectDir, 'src', 'payload.config.ts'), PAYLOAD_CONFIG)
   // .env files are gitignored, so it is written here, with fake values only.
-  await writeFile(path.join(projectDir, '.env'), `PAYLOAD_SECRET=init-secret-not-real\nDATABASE_URI=file:${posix(path.join(dataDir, 'init.db'))}\n`)
+  const databaseUri =
+    TEST_DB === 'mongodb'
+      ? mongoUrl(process.env.WP2P_TEST_MONGO_URL ?? '', `wp2p_${path.basename(dataDir).replace(/[^A-Za-z0-9_]/g, '_')}`)
+      : `file:${posix(path.join(dataDir, 'init.db'))}`
+  await writeFile(path.join(projectDir, '.env'), `PAYLOAD_SECRET=init-secret-not-real\nDATABASE_URI=${databaseUri}\n`)
   for (const key of ENV_KEYS) delete process.env[key]
   booted = await bootPayload({ cwd: projectDir, configPath: 'src/payload.config.ts' })
 })
 
 afterAll(async () => {
+  // MongoDB: drop this file's database before the connection closes.
+  const db = booted?.payload.db as { connection?: { dropDatabase?: () => Promise<unknown> } } | undefined
+  if (TEST_DB === 'mongodb') await db?.connection?.dropDatabase?.()
   await booted?.close()
   for (const key of ENV_KEYS) {
     if (savedEnv[key] === undefined) delete process.env[key]

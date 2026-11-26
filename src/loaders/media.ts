@@ -107,31 +107,38 @@ export async function loadMedia(
       for (const f of inspected.findings) ctx.report.finding({ ...f, media: m.wpId })
 
       const pending = inflight.get(inspected.sha256)
-      const duplicate = pending ? await pending : await findBySha(ctx, inspected.sha256)
-      if (duplicate !== undefined) {
-        ctx.ids.set('media', m.wpId, duplicate)
+      const shared = pending ? await pending : undefined
+      if (shared !== undefined) {
+        ctx.ids.set('media', m.wpId, shared)
         ctx.report.count(PHASE, 'reused')
         return
       }
-      if (ctx.dryRun) {
-        ctx.report.count(PHASE, 'created')
-        return
-      }
-      const upload = withRetry(
-        () =>
-          upsertByWpMeta(ctx.payload, {
-            collection,
-            meta: { site: ctx.site, wpId: m.wpId, link: m.sourceUrl, sha256: inspected.sha256 },
-            data: describe(m),
-            file: { data: inspected.output, mimetype: inspected.mime, name: inspected.filename, size: inspected.output.length },
-          }),
-        opts.retry,
-      )
+      // Claim the hash before the first await, so items with the same bytes wait for this
+      // lookup and upload instead of all missing in findBySha and uploading again.
+      const work = (async (): Promise<{ id: PayloadId; action: 'created' | 'updated' | 'reused' } | undefined> => {
+        const duplicate = await findBySha(ctx, inspected.sha256)
+        if (duplicate !== undefined) return { id: duplicate, action: 'reused' }
+        if (ctx.dryRun) return undefined
+        return withRetry(
+          () =>
+            upsertByWpMeta(ctx.payload, {
+              collection,
+              meta: { site: ctx.site, wpId: m.wpId, link: m.sourceUrl, sha256: inspected.sha256 },
+              data: describe(m),
+              file: { data: inspected.output, mimetype: inspected.mime, name: inspected.filename, size: inspected.output.length },
+            }),
+          opts.retry,
+        )
+      })()
       inflight.set(
         inspected.sha256,
-        upload.then((r) => r.id, () => undefined),
+        work.then((r) => r?.id, () => undefined),
       )
-      const res = await upload
+      const res = await work
+      if (res === undefined) {
+        ctx.report.count(PHASE, 'created') // dry run: would be created
+        return
+      }
       ctx.ids.set('media', m.wpId, res.id)
       ctx.report.count(PHASE, res.action)
     } catch (error) {
