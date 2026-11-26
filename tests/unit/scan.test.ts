@@ -95,8 +95,8 @@ describe('wp2payload scan', () => {
     const lines: string[] = []
     expect(await runScanCommand({ cwd, log: (l) => lines.push(l), env: {} })).toBe(2)
     expect(lines.join('\n')).toMatch(/wp2payload scan https:\/\/example\.com/)
-    expect(await runScanCommand({ cwd, target: 'site.zip', log: (l) => lines.push(l), env: {} })).toBe(2)
-    expect(lines.join('\n')).toMatch(/Cannot tell what "site\.zip" is/)
+    expect(await runScanCommand({ cwd, target: 'site.7z', log: (l) => lines.push(l), env: {} })).toBe(2)
+    expect(lines.join('\n')).toMatch(/Cannot tell what "site\.7z" is/)
   })
 })
 

@@ -1,4 +1,5 @@
 import { open, type FileHandle } from 'node:fs/promises'
+import { Readable } from 'node:stream'
 import { createGunzip } from 'node:zlib'
 
 // Streaming reader for MySQL dumps (mysqldump, phpMyAdmin, backup plugins). Nothing in the dump is
@@ -31,39 +32,33 @@ export const MAX_VALUE_CHARS = 64 * 1024 * 1024
 
 const ESCAPES: Record<string, string> = { '0': '\0', b: '\b', n: '\n', r: '\r', t: '\t', Z: '\x1a' }
 
+/**
+ * A dump inside a zip backup, read in place: its unpacked size (checked against the real stream by
+ * the archive reader) and a way to stream it from the start. It may itself be gzipped.
+ */
+export interface DumpInput {
+  /** For messages: the entry name inside the archive. */
+  name: string
+  size: number
+  open(): Promise<Readable>
+}
+
 /** `tables`: the table names to read rows of; `CREATE TABLE` columns are reported for every table. */
 /** `range`: the dump is a slice of a larger file (a .wpress backup), from `start` for `length` bytes. */
 export async function* readDump(
-  file: string,
+  file: string | DumpInput,
   opts: { tables: ReadonlySet<string>; maxBytes?: number; range?: { start: number; length: number } },
 ): AsyncIterable<DumpEvent> {
-  let fh: FileHandle
-  try {
-    fh = await open(file, 'r')
-  } catch {
-    throw new DumpError('DUMP_NOT_FOUND', `SQL dump not found: ${file}`)
-  }
-  let raw: ReturnType<FileHandle['createReadStream']>
-  let size: number
-  const head = Buffer.alloc(2)
-  try {
-    const s = await fh.stat()
-    if (!s.isFile()) throw new DumpError('DUMP_NOT_FOUND', `${file} is not a file.`)
-    size = opts.range ? opts.range.length : s.size
-    const max = opts.maxBytes ?? MAX_DUMP_BYTES
-    if (size > max) throw new DumpError('DUMP_TOO_LARGE', `The dump is ${Math.ceil(size / 1024 ** 2)} MB; the limit is ${Math.floor(max / 1024 ** 2)} MB.`)
-    await fh.read(head, 0, Math.min(2, size), opts.range?.start ?? 0)
-    raw = fh.createReadStream({
-      highWaterMark: 1024 * 1024,
-      ...(opts.range ? { start: opts.range.start, end: opts.range.start + opts.range.length - 1 } : {}),
-    })
-  } catch (error) {
-    await fh.close()
-    throw error
-  }
   const max = opts.maxBytes ?? MAX_DUMP_BYTES
-  const gz = head[0] === 0x1f && head[1] === 0x8b
-  const stream = gz ? raw.pipe(createGunzip()) : raw
+  const { raw, gz } = typeof file === 'string' ? await openFile(file, max, opts.range) : await openInput(file, max)
+  const archived = typeof file !== 'string'
+  let stream: Readable = raw
+  if (gz) {
+    const gunzip = createGunzip()
+    // pipe() does not forward errors: a damaged archive entry must end the read, not stall it.
+    raw.on('error', (error) => gunzip.destroy(error))
+    stream = raw.pipe(gunzip)
+  }
   stream.setEncoding('utf8')
 
   const parser = new DumpParser(opts.tables)
@@ -72,17 +67,74 @@ export async function* readDump(
     for await (const chunk of stream) {
       // A small .gz can hold a huge dump: the cap applies to what it unpacks to.
       inflated += (chunk as string).length
-      if (gz && inflated > max) throw new DumpError('DUMP_TOO_LARGE', `The dump unpacks to over ${Math.floor(max / 1024 ** 2)} MB.`)
+      if ((gz || archived) && inflated > max) throw new DumpError('DUMP_TOO_LARGE', `The dump unpacks to over ${Math.floor(max / 1024 ** 2)} MB.`)
       yield* parser.feed(chunk as string)
     }
     yield* parser.end()
   } catch (error) {
     if (error instanceof DumpError) throw error
-    if ((error as { code?: string }).code?.startsWith('Z_')) throw new DumpError('DUMP_INVALID', 'The .gz file is damaged.')
+    if ((error as { code?: string }).code?.startsWith('Z_')) throw new DumpError('DUMP_INVALID', archived ? `The database ${file.name} in the archive is damaged.` : 'The .gz file is damaged.')
+    // The archive reader checks sizes and CRCs as it streams; any failure there means a damaged entry.
+    if (archived) throw new DumpError('DUMP_INVALID', `The database ${file.name} could not be read from the archive (it is damaged).`)
     throw error
   } finally {
     raw.destroy()
   }
+}
+
+async function openFile(file: string, max: number, range: { start: number; length: number } | undefined): Promise<{ raw: Readable; gz: boolean }> {
+  let fh: FileHandle
+  try {
+    fh = await open(file, 'r')
+  } catch {
+    throw new DumpError('DUMP_NOT_FOUND', `SQL dump not found: ${file}`)
+  }
+  const head = Buffer.alloc(2)
+  try {
+    const s = await fh.stat()
+    if (!s.isFile()) throw new DumpError('DUMP_NOT_FOUND', `${file} is not a file.`)
+    const size = range ? range.length : s.size
+    if (size > max) throw new DumpError('DUMP_TOO_LARGE', `The dump is ${Math.ceil(size / 1024 ** 2)} MB; the limit is ${Math.floor(max / 1024 ** 2)} MB.`)
+    await fh.read(head, 0, Math.min(2, size), range?.start ?? 0)
+    const raw = fh.createReadStream({
+      highWaterMark: 1024 * 1024,
+      ...(range ? { start: range.start, end: range.start + range.length - 1 } : {}),
+    })
+    return { raw, gz: head[0] === 0x1f && head[1] === 0x8b }
+  } catch (error) {
+    await fh.close()
+    throw error
+  }
+}
+
+/** Opens an archived dump and peeks at its first bytes to tell a gzipped dump from plain SQL. */
+async function openInput(input: DumpInput, max: number): Promise<{ raw: Readable; gz: boolean }> {
+  if (input.size > max) throw new DumpError('DUMP_TOO_LARGE', `The dump is ${Math.ceil(input.size / 1024 ** 2)} MB; the limit is ${Math.floor(max / 1024 ** 2)} MB.`)
+  const source = await input.open()
+  const chunks = source[Symbol.asyncIterator]() as AsyncIterator<Buffer>
+  let first: IteratorResult<Buffer>
+  try {
+    first = await chunks.next()
+  } catch {
+    source.destroy()
+    throw new DumpError('DUMP_INVALID', `The database ${input.name} could not be read from the archive (it is damaged).`)
+  }
+  // Gzip magic in the first two bytes; a first chunk of one byte is not worth a second peek.
+  const gz = !first.done && first.value.length >= 2 && first.value[0] === 0x1f && first.value[1] === 0x8b
+  async function* replay(): AsyncGenerator<Buffer> {
+    try {
+      if (first.done) return
+      yield first.value
+      for (;;) {
+        const next = await chunks.next()
+        if (next.done) return
+        yield next.value
+      }
+    } finally {
+      source.destroy()
+    }
+  }
+  return { raw: Readable.from(replay(), { objectMode: false }), gz }
 }
 
 type Mode = 'head' | 'skip' | 'values'

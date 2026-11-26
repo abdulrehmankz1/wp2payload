@@ -12,7 +12,7 @@ const UNSAFE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u061c\u200e
 const esc = (v: unknown) => String(v ?? '').replace(UNSAFE, '?').replace(/[&<>"']/g, (c) => ESC[c]!)
 
 const SEVERITIES: Severity[] = ['high', 'medium', 'low']
-const SOURCES: Record<ScanReport['source'], string> = { rest: 'live site (REST API)', wxr: 'WordPress export file', sql: 'SQL backup', wpress: 'All-in-One WP Migration backup' }
+const SOURCES: Record<ScanReport['source'], string> = { rest: 'live site (REST API)', wxr: 'WordPress export file', sql: 'SQL backup', wpress: 'All-in-One WP Migration backup', archive: 'zip or tar backup' }
 const MAX_ROWS = 2000
 
 export function renderScanHtml(r: ScanReport, opts: { version: string }): string {

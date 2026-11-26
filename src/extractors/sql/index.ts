@@ -5,16 +5,17 @@ import { normaliseSlug, toPlainText } from '../rest/decode.js'
 import { NOT_CONTENT_TYPES, mapStatus, pageBuilder, type SeoPluginOption } from '../rest/index.js'
 import { ReusableRun } from '../rest/reusable.js'
 import { INTERNAL_TYPES, SEO_KEYS, isoDate, mapSeoMeta, positiveId } from '../postmeta.js'
-import { DumpError, readDump, type DumpEvent, type SqlValue } from './dump.js'
+import { DumpError, readDump, type DumpEvent, type DumpInput, type SqlValue } from './dump.js'
 
-export { DumpError } from './dump.js'
+export { DumpError, type DumpInput } from './dump.js'
 
 // A SQL dump plus the uploads folder as a source (doc F12, "backup mode"). The dump is read as
 // text, never run; only the columns below are kept, so password hashes and emails never leave
 // the parser. Media is read from the uploads folder, so nothing is downloaded.
 
 export interface SqlExtractorOptions {
-  file: string
+  /** A dump file, or a dump read in place from a zip backup. */
+  file: string | DumpInput
   /** The dump is a slice of `file` (database.sql inside a .wpress backup). */
   range?: { start: number; length: number }
   tablePrefix?: string
@@ -84,7 +85,7 @@ interface SqlIndex {
 
 export class SqlExtractor implements Extractor {
   readonly name = 'sql' as const
-  readonly #file: string
+  readonly #file: string | DumpInput
   readonly #range: { start: number; length: number } | undefined
   readonly #prefix: string
   readonly #statuses: Set<string>
@@ -94,7 +95,7 @@ export class SqlExtractor implements Extractor {
   #index: Promise<SqlIndex> | undefined
 
   constructor(o: SqlExtractorOptions) {
-    this.#file = path.resolve(o.file)
+    this.#file = typeof o.file === 'string' ? path.resolve(o.file) : o.file
     this.#range = o.range
     this.#prefix = o.tablePrefix ?? 'wp_'
     this.#statuses = new Set(o.statuses ?? ['publish'])

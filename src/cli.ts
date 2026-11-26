@@ -105,10 +105,10 @@ program
 
 program
   .command('scan')
-  .argument('[target]', 'a site URL, export file (.xml), SQL dump (.sql, .sql.gz) or .wpress backup; default: the configured source')
+  .argument('[target]', 'a site URL, export file (.xml), SQL dump (.sql, .sql.gz, -db.gz), .wpress backup or .zip/.tar.gz/.tgz backup; default: the configured source')
   .description('Security and content health report of a site, without migrating. Needs no Payload project')
   .option('--config <path>', 'config file location (default: wp2payload.config.ts)')
-  .option('--uploads <dir>', 'uploads folder for a SQL dump (default: uploads next to the dump)')
+  .option('--uploads <path>', 'for a SQL dump: the uploads folder (default: uploads next to the dump), or an uploads archive (repeatable)', (value: string, prev: string[] = []) => [...prev, value])
   .option('--no-media', 'do not download or check media files')
   .option('--limit <n>', 'scan only the first n documents', positiveInt('--limit'))
   .option('--concurrency <n>', 'parallel media checks (default 4)', positiveInt('--concurrency'))
@@ -124,7 +124,7 @@ program
       ...configAt(opts.config),
       // A file target is given relative to where the user typed it.
       ...(target ? { target: /^https?:\/\//i.test(target) ? target : path.resolve(here, target) } : {}),
-      ...(opts.uploads ? { uploads: path.resolve(here, opts.uploads) } : {}),
+      ...(opts.uploads?.length ? { uploads: opts.uploads.map((u) => path.resolve(here, u)) } : {}),
       media: opts.media !== false,
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -139,7 +139,7 @@ program
 
 interface ScanCliOptions {
   config?: string
-  uploads?: string
+  uploads?: string[]
   media?: boolean
   limit?: number
   concurrency?: number

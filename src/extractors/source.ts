@@ -2,6 +2,7 @@ import path from 'node:path'
 import type { ResolvedConfig } from '../config/index.js'
 import type { Extractor, IRDocument } from '../ir/types.js'
 import { readLocalMedia } from '../security/media/local.js'
+import { openArchive, openUploadsArchives } from './archive/index.js'
 import { RestError, RestExtractor } from './rest/index.js'
 import { DumpError, SqlExtractor } from './sql/index.js'
 import { WPRESS_TABLE_PREFIX, indexWpress, readWpressMedia } from './wpress.js'
@@ -18,14 +19,24 @@ export interface OpenedSource {
   trustSiteHost: boolean
   /** How the CLI introduces the source: "WordPress at", "Export of", "Backup of". */
   label: string
+  /** Files under the uploads folder of a zip or tar backup (doctor shows it). */
+  uploadFiles?: number
+  /** Releases the source: closes archives and removes a tar backup's temp folder. Call it when done. */
+  close?: () => Promise<void>
+}
+
+export interface OpenSourceOptions {
+  /** False when no media will be read (doctor, scan --no-media): a tar backup's uploads are not unpacked. */
+  media?: boolean
 }
 
 /** A source problem the CLI reports as a failed check, not a crash. */
 export const isSourceError = (error: unknown): error is Error => error instanceof RestError || error instanceof WxrError || error instanceof DumpError
 
-export async function openSource(config: ResolvedConfig, cwd: string): Promise<OpenedSource> {
+export async function openSource(config: ResolvedConfig, cwd: string, opts: OpenSourceOptions = {}): Promise<OpenedSource> {
   const { source } = config
   const common = { statuses: config.statuses, seoPlugin: config.seo.plugin }
+  const archive = { media: opts.media !== false, maxMediaBytes: Math.floor(config.media.maxFileSizeMB * 1024 * 1024) }
   switch (source.type) {
     case 'rest':
       return {
@@ -43,10 +54,25 @@ export async function openSource(config: ResolvedConfig, cwd: string): Promise<O
         label: 'Export of',
       }
     case 'sql': {
-      const uploads = path.resolve(cwd, source.uploadsDir)
+      const extractor = new SqlExtractor({ file: path.resolve(cwd, source.file), tablePrefix: source.tablePrefix, ...common })
+      if (source.uploads !== undefined) {
+        // UpdraftPlus: the dump plus one or more uploads archives.
+        const files = (Array.isArray(source.uploads) ? source.uploads : [source.uploads]).map((f) => path.resolve(cwd, f))
+        const uploads = await openUploadsArchives(files, archive)
+        return {
+          extractor,
+          ...(uploads.readMedia ? { readLocalMedia: uploads.readMedia } : {}),
+          trustSiteHost: false,
+          label: 'Backup of',
+          uploadFiles: uploads.uploads,
+          close: uploads.close,
+        }
+      }
+      // The schema requires exactly one of uploads and uploadsDir.
+      const dir = path.resolve(cwd, source.uploadsDir as string)
       return {
-        extractor: new SqlExtractor({ file: path.resolve(cwd, source.file), tablePrefix: source.tablePrefix, ...common }),
-        readLocalMedia: (rel, max) => readLocalMedia(uploads, rel, max),
+        extractor,
+        readLocalMedia: (rel, max) => readLocalMedia(dir, rel, max),
         trustSiteHost: false,
         label: 'Backup of',
       }
@@ -63,6 +89,21 @@ export async function openSource(config: ResolvedConfig, cwd: string): Promise<O
         readLocalMedia: (rel, max) => readWpressMedia(backup, rel, max),
         trustSiteHost: false,
         label: 'Backup of',
+      }
+    }
+    case 'archive': {
+      const backup = await openArchive(path.resolve(cwd, source.file), { database: true, ...archive })
+      if (backup.database === undefined) {
+        await backup.close()
+        throw new DumpError('DUMP_NO_WORDPRESS', 'The backup has no SQL dump.')
+      }
+      return {
+        extractor: new SqlExtractor({ file: backup.database, tablePrefix: source.tablePrefix, ...common }),
+        ...(backup.readMedia ? { readLocalMedia: backup.readMedia } : {}),
+        trustSiteHost: false,
+        label: 'Backup of',
+        uploadFiles: backup.uploads,
+        close: backup.close,
       }
     }
   }
