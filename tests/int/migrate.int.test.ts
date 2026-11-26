@@ -140,7 +140,7 @@ describe('runPipeline', () => {
   it('a re-run after a hard crash mid-documents reaches the same final state as a clean run (doc 2.11)', async () => {
     const shape = (origin: string) => [
       doc(origin, 100, 'post'),
-      doc(origin, 101, 'post', { authorWpId: undefined, termWpIds: [11] }),
+      doc(origin, 101, 'post', { termWpIds: [11] }),
       doc(origin, 102, 'post'),
       doc(origin, 200, 'page'),
       doc(origin, 201, 'page', { parentWpId: 200 }),
