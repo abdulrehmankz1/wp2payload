@@ -8,6 +8,8 @@ import { DumpError, type DumpInput } from '../sql/dump.js'
 import {
   ArchiveError,
   DEFAULT_ARCHIVE_LIMITS,
+  dumpRank,
+  dumpTooLarge,
   insideRoot,
   isDumpCandidate,
   overRatio,
@@ -29,7 +31,8 @@ export { ArchiveError, DEFAULT_ARCHIVE_LIMITS, type ArchiveCode, type ArchiveLim
 // - hand-made .zip, .tar.gz, .tgz or .tar with a .sql dump and wp-content/uploads.
 // Zips are read in place. A tar.gz cannot be read at random, so the dump and the uploads (nothing
 // else: no themes, plugins or PHP) are extracted once into a private temp folder that is removed
-// when the source closes, when the process exits, and on Ctrl+C.
+// when the source closes, when the process exits, on Ctrl+C or Ctrl+Break, and when the terminal
+// closes. Only dump candidates that can still be picked are kept, under the dump size cap.
 
 export interface OpenArchiveOptions {
   /** Look for the SQL dump inside (false for uploads-only archives). */
@@ -154,23 +157,46 @@ async function openTar(file: string, gzip: boolean, o: OpenArchiveOptions, limit
     /** Uploads too large to keep, by full path: reading them fails with the size. */
     const oversized = new Map<string, number>()
     let uploadFiles = new Map<string, number>()
+    // Dump candidates kept on disk only as dumps (not also as uploads), with their rank and size.
+    // Only candidates that can still be picked are kept, and together they stay under the dump cap,
+    // so a tar full of .sql files cannot fill the temp disk (SEC-03).
+    const dumps = new Map<string, { rank: number; size: number }>()
+    let bestRank = Infinity
+    let dumpBytes = 0
     await readTar(file, gzip, limits, async (rel, size) => {
-      let keep = false
-      if (o.database && isDumpCandidate(rel)) {
-        candidates.push(rel)
-        keep = true
-      }
+      let keepUpload = false
       const u = uploadsPart(rel)
       if (u) {
         prefixes.add(u.prefix)
         uploadFiles.set(rel, size)
         if (o.media) {
           if (size > o.maxMediaBytes) oversized.set(rel, size)
-          else keep = true
+          else keepUpload = true
+        }
+      }
+      let keepDump = false
+      if (o.database && isDumpCandidate(rel)) {
+        candidates.push(rel)
+        const rank = dumpRank(rel)
+        if (rank < bestRank) {
+          // Every candidate kept so far has lost: remove it before writing more.
+          bestRank = rank
+          for (const [old, d] of dumps) {
+            if (d.rank <= rank) continue
+            dumps.delete(old)
+            dumpBytes -= d.size
+            await rm(insideRoot(file, root, old), { force: true })
+          }
+        }
+        keepDump = rank === bestRank && !keepUpload && !kept.has(rel)
+        if (keepDump) {
+          if (size > limits.maxDumpBytes || dumpBytes + size > limits.maxDumpBytes) throw dumpTooLarge(file, rel, limits)
+          dumps.set(rel, { rank, size })
+          dumpBytes += size
         }
       }
       // The first of duplicate names wins, as for zip.
-      if (!keep || kept.has(rel)) return undefined
+      if (!(keepUpload || keepDump) || kept.has(rel)) return undefined
       kept.add(rel)
       return fileSink(file, root, rel)
     })
@@ -234,37 +260,63 @@ async function fileSink(archive: string, root: string, rel: string): Promise<Tar
 // without it (an uncaught error, process.exit, Ctrl+C in a command with no handler of its own).
 const live = new Set<string>()
 
-function removeAllSync(): void {
-  for (const dir of live) rmSync(dir, { recursive: true, force: true, maxRetries: 3 })
+/**
+ * Signals that end the run: Ctrl+C, kill, the terminal closing (SIGHUP; on Windows, closing the
+ * console window) and Ctrl+Break on Windows (SIGBREAK). Each exits with 128 + its number.
+ */
+const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const
+const SIGNAL_NUMBERS: Record<(typeof SIGNALS)[number], number> = { SIGINT: 2, SIGTERM: 15, SIGHUP: 1, SIGBREAK: 21 }
+
+/**
+ * Removes every live temp folder now. One that cannot be removed (a file still open on Windows,
+ * say) does not stop the others; its path is printed so it can be removed by hand. Exported for tests.
+ */
+export function removeTempFoldersSync(remove: (dir: string) => void = (dir) => rmSync(dir, { recursive: true, force: true, maxRetries: 3 })): void {
+  const dirs = [...live]
   live.clear()
+  hooks(false)
+  for (const dir of dirs) {
+    try {
+      remove(dir)
+    } catch {
+      process.stderr.write(`wp2payload: could not remove the temp folder ${dir}\n`)
+    }
+  }
 }
+
+// 'exit' passes the exit code: the remover must not receive it.
+const onExit = () => removeTempFoldersSync()
 
 function onSignal(signal: NodeJS.Signals): void {
   // migrate handles Ctrl+C itself (finish the item, then close the source): leave it to that.
   if (process.listenerCount(signal) > 1) return
-  removeAllSync()
-  process.exit(signal === 'SIGINT' ? 130 : 143)
+  removeTempFoldersSync()
+  process.exit(128 + (SIGNAL_NUMBERS[signal as (typeof SIGNALS)[number]] ?? 15))
+}
+
+function hooks(on: boolean): void {
+  const method = on ? 'on' : 'off'
+  process[method]('exit', onExit)
+  for (const s of SIGNALS) process[method](s, onSignal)
 }
 
 async function tempRoot(parent: string | undefined): Promise<string> {
   // mkdtemp makes the folder 0700: private to this user.
   const dir = await realpath(await mkdtemp(path.join(parent ?? os.tmpdir(), 'wp2payload-backup-')))
-  if (live.size === 0) {
-    process.on('exit', removeAllSync)
-    process.on('SIGINT', onSignal)
-    process.on('SIGTERM', onSignal)
-  }
+  if (live.size === 0) hooks(true)
   live.add(dir)
   return dir
 }
 
 async function removeRoot(dir: string): Promise<void> {
   if (!live.delete(dir)) return
-  await rm(dir, { recursive: true, force: true, maxRetries: 3 })
-  if (live.size === 0) {
-    process.off('exit', removeAllSync)
-    process.off('SIGINT', onSignal)
-    process.off('SIGTERM', onSignal)
+  // The hooks go first, so a folder that cannot be removed does not leave listeners behind.
+  if (live.size === 0) hooks(false)
+  try {
+    await rm(dir, { recursive: true, force: true, maxRetries: 3 })
+  } catch {
+    // Closing the source must not fail the run; say what was left behind instead.
+    process.stderr.write(`wp2payload: could not remove the temp folder ${dir}\n`)
   }
 }
 

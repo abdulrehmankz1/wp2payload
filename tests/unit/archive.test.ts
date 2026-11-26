@@ -1,15 +1,15 @@
-import { existsSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { gzipSync } from 'node:zlib'
 import sharp from 'sharp'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runDoctor } from '../../src/commands/doctor.js'
 import { runScanCommand, sourceFor } from '../../src/commands/scan.js'
 import { resolveConfig } from '../../src/config/index.js'
-import { openArchive, openUploadsArchives, type OpenArchiveOptions } from '../../src/extractors/archive/index.js'
-import { entryPath, uploadsPart } from '../../src/extractors/archive/rules.js'
+import { openArchive, openUploadsArchives, removeTempFoldersSync, type OpenArchiveOptions } from '../../src/extractors/archive/index.js'
+import { entryPath, insideRoot, pickDump, uploadsPart } from '../../src/extractors/archive/rules.js'
 import { openSource } from '../../src/extractors/source.js'
 import { SqlExtractor, type SqlExtractorOptions } from '../../src/extractors/sql/index.js'
 import type { ScanReport } from '../../src/scan/run.js'
@@ -254,6 +254,200 @@ describe('hostile archives (T11): refused with a code, nothing written outside t
     await expect(openArchive(await file('t.tar.gz', truncated), opts())).rejects.toMatchObject({ code: 'DUMP_INVALID' })
     await expect(openArchive(path.join(dir, 'none.zip'), opts())).rejects.toMatchObject({ code: 'DUMP_NOT_FOUND' })
     expect(await readdir(tmp)).toEqual([])
+  })
+})
+
+describe('security review fixes (SEC-02, SEC-03, SEC-04, SEC-08)', () => {
+  // SEC-02: Windows reads the part before the first dot, trailing spaces trimmed.
+  const DEVICES = ['con .sql', 'nul .jpg', 'sub/aux  .txt', 'CONOUT$', 'conin$.txt', 'com¹.txt', 'LPT³', 'Prn', 'a/b/NUL.tar.gz', 'aux /x.png', 'com0.txt']
+  const ALLOWED = ['console.sql', 'nullable.jpg', 'auxiliary/x.png', 'com10.txt', 'lpt.txt', 'conout.txt', 'my con.sql', 'x.con']
+
+  it.each(DEVICES)('refuses the device name %j in any segment', (rel) => {
+    expect(() => insideRoot('a.tar', path.resolve(tmp), rel)).toThrow(expect.objectContaining({ code: 'SEC_ARCHIVE_PATH_TRAVERSAL', message: expect.stringMatching(/reserves/) }))
+  })
+
+  it.each(ALLOWED)('allows the ordinary name %j', (rel) => {
+    expect(insideRoot('a.tar', path.resolve(tmp), rel)).toBe(path.resolve(tmp, ...rel.split('/')))
+  })
+
+  it('refuses a tar upload named like a device with a space before the dot', async () => {
+    const f = await tgz([{ name: 'database.sql', data: WP_DUMP }, { name: 'wp-content/uploads/sub/nul .jpg', data: png }])
+    await expect(openArchive(f, opts())).rejects.toMatchObject({ code: 'SEC_ARCHIVE_PATH_TRAVERSAL', message: /reserves/ })
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  // SEC-03: dump candidates are capped before they are written, and only possible winners are kept.
+  it('refuses a tar dump candidate over the dump cap before writing it', async () => {
+    const f = await tgz([{ name: 'database.sql', data: Buffer.alloc(4096, 0x41) }])
+    await expect(openArchive(f, opts({ limits: { maxDumpBytes: 1024 } }))).rejects.toMatchObject({ code: 'SEC_ARCHIVE_TOO_LARGE', message: /SQL dumps/ })
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it('caps the bytes of tar dump candidates kept together', async () => {
+    const sql = Buffer.alloc(400, 0x41)
+    const f = await tgz([{ name: 'a.sql', data: sql }, { name: 'b.sql', data: sql }, { name: 'c.sql', data: sql }])
+    await expect(openArchive(f, opts({ limits: { maxDumpBytes: 1000 } }))).rejects.toMatchObject({ code: 'SEC_ARCHIVE_TOO_LARGE' })
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it('keeps only the tar dump candidates that can still be picked', async () => {
+    const filler = Buffer.alloc(300, 0x41)
+    const dup = 'site/dup-installer/dup-database__6f1e2d.sql'
+    const f = await tgz([
+      { name: 'deep/a/b/old.sql', data: filler },
+      { name: 'database.sql', data: filler },
+      { name: dup, data: WP_DUMP },
+      // Dominated once Duplicator's dump is seen: never written, so not counted, even when huge.
+      { name: 'later.sql', data: filler },
+      { name: 'old/huge.sql.gz', data: Buffer.alloc(8192, 0x42) },
+    ])
+    const cap = Math.max(filler.length, WP_DUMP.length) + 10
+    const a = await openArchive(f, opts({ limits: { maxDumpBytes: cap } }))
+    try {
+      expect(a.database).toBe(path.join(a.tempRoot!, ...dup.split('/')))
+      expect((await probe(a.database!)).siteUrl).toBe('https://old.example')
+      for (const gone of ['deep/a/b/old.sql', 'database.sql', 'later.sql', 'old/huge.sql.gz']) expect(existsSync(path.join(a.tempRoot!, ...gone.split('/'))), gone).toBe(false)
+    } finally {
+      await a.close()
+    }
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it('picks the same dump as before the ranking was shared', () => {
+    expect(pickDump('a', ['x/y.sql', 'database.sql', 'z.sql'])).toBe('database.sql')
+    expect(pickDump('a', ['database.sql', 'database.sql'])).toBe('database.sql')
+    expect(pickDump('a', ['database.sql', 'b/dup-installer/dup-database__1.sql'])).toBe('b/dup-installer/dup-database__1.sql')
+    expect(pickDump('a', ['a/b/dup-installer/dup-database__1.sql', 'b/dup-installer/dup-database__2.sql'])).toBe('b/dup-installer/dup-database__2.sql')
+    expect(pickDump('a', ['x/y.sql', 'q.sql.gz'])).toBe('q.sql.gz')
+    expect(() => pickDump('a', ['a.sql', 'b.sql'])).toThrow(/several SQL dumps/)
+    expect(() => pickDump('a', ['dup-installer/dup-database__1.sql', 'dup-installer/dup-database__2.sql'])).toThrow(/several SQL dumps/)
+    expect(() => pickDump('a', [])).toThrow(expect.objectContaining({ code: 'DUMP_NO_WORDPRESS' }))
+  })
+
+  // SEC-04: cleanup hooks cover every signal that ends a run, and never leak.
+  const EVENTS = ['exit', 'SIGINT', 'SIGTERM', 'SIGHUP', 'SIGBREAK'] as const
+  const counts = () => EVENTS.map((e) => process.listenerCount(e))
+  const tarItems = () => [{ name: 'db.sql', data: WP_DUMP }]
+
+  it('adds its exit and signal hooks once while a tar is open, and removes them on close', async () => {
+    const warnings: Error[] = []
+    const onWarning = (w: Error) => warnings.push(w)
+    process.on('warning', onWarning)
+    try {
+      const before = counts()
+      const f = await tgz(tarItems())
+      for (let i = 0; i < 15; i++) {
+        const a = await openArchive(f, opts())
+        const b = await openArchive(f, opts())
+        expect(counts()).toEqual(before.map((c) => c + 1))
+        await a.close()
+        expect(counts()).toEqual(before.map((c) => c + 1))
+        await b.close()
+        expect(counts()).toEqual(before)
+      }
+      // A failed open removes them too.
+      await expect(openArchive(await tgz([{ name: '../evil.sql', data: 'x' }]), opts())).rejects.toMatchObject({ code: 'SEC_ARCHIVE_PATH_TRAVERSAL' })
+      expect(counts()).toEqual(before)
+      await new Promise((r) => setImmediate(r))
+      expect(warnings.filter((w) => w.name === 'MaxListenersExceededWarning')).toEqual([])
+    } finally {
+      process.off('warning', onWarning)
+    }
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it('removes every temp folder it can, and names the ones it cannot', async () => {
+    const before = counts()
+    const f = await tgz(tarItems())
+    const a = await openArchive(f, opts())
+    const b = await openArchive(f, opts())
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+    try {
+      removeTempFoldersSync((d) => {
+        if (d === a.tempRoot) throw Object.assign(new Error('EBUSY: secret detail'), { code: 'EBUSY' })
+        rmSync(d, { recursive: true, force: true })
+      })
+      expect(existsSync(b.tempRoot!)).toBe(false)
+      expect(existsSync(a.tempRoot!)).toBe(true)
+      const out = stderr.mock.calls.map((c) => String(c[0])).join('')
+      expect(out).toContain(a.tempRoot!)
+      expect(out).not.toContain(b.tempRoot!)
+      expect(out).not.toContain('secret detail')
+      expect(counts()).toEqual(before)
+    } finally {
+      stderr.mockRestore()
+      await a.close()
+      await b.close()
+      await rm(a.tempRoot!, { recursive: true, force: true })
+    }
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it.each([
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+    ['SIGBREAK', 149],
+  ] as const)('on %s alone, removes the temp folder and exits with %i', async (signal, code) => {
+    const f = await tgz(tarItems())
+    const others = process.listeners(signal)
+    for (const l of others) process.off(signal, l)
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    try {
+      const a = await openArchive(f, opts())
+      process.emit(signal, signal)
+      expect(exit).toHaveBeenCalledWith(code)
+      expect(existsSync(a.tempRoot!)).toBe(false)
+      expect(process.listenerCount(signal)).toBe(0)
+      await a.close()
+    } finally {
+      exit.mockRestore()
+      for (const l of others) process.on(signal, l)
+    }
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  it('leaves Ctrl+C to a command that handles it (migrate)', async () => {
+    const f = await tgz(tarItems())
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    const own = vi.fn()
+    process.on('SIGINT', own)
+    try {
+      const a = await openArchive(f, opts())
+      process.emit('SIGINT', 'SIGINT')
+      expect(own).toHaveBeenCalledOnce()
+      expect(exit).not.toHaveBeenCalled()
+      expect(existsSync(a.tempRoot!)).toBe(true)
+      await a.close()
+    } finally {
+      process.off('SIGINT', own)
+      exit.mockRestore()
+    }
+    expect(await readdir(tmp)).toEqual([])
+  })
+
+  // SEC-08: zip entries whose local records overlap (overlap bombs) refuse the archive.
+  /** Points central directory record `index` at local offset `offset`. */
+  function repoint(zipData: Buffer, index: number, offset: number): Buffer {
+    const out = Buffer.from(zipData)
+    const end = out.length - 22
+    let pos = out.readUInt32LE(end + 16)
+    for (let i = 0; i < index; i++) pos += 46 + out.readUInt16LE(pos + 28) + out.readUInt16LE(pos + 30) + out.readUInt16LE(pos + 32)
+    out.writeUInt32LE(offset, pos + 42)
+    return out
+  }
+
+  it('refuses zip entries that share data: SEC_ARCHIVE_OVERLAP', async () => {
+    const items: ZipItem[] = [{ name: 'database.sql', data: WP_DUMP }, { name: 'wp-content/uploads/a.png', data: png }, { name: 'wp-content/uploads/b.png', data: png }]
+    const good = makeZip(items)
+    // Full overlap: two records over the same local header.
+    await expect(openArchive(await file('full.zip', repoint(good, 2, 0)), opts())).rejects.toMatchObject({ code: 'SEC_ARCHIVE_OVERLAP', message: /entries 1 and 3/ })
+    // A record that starts inside another entry's data.
+    await expect(openArchive(await file('part.zip', repoint(good, 1, 40)), opts())).rejects.toMatchObject({ code: 'SEC_ARCHIVE_OVERLAP' })
+    // The untouched zip still opens and reads.
+    const a = await openArchive(await file('good.zip', good), opts())
+    expect(await a.readMedia!('b.png', 1024 ** 2)).toEqual(png)
+    await a.close()
   })
 })
 

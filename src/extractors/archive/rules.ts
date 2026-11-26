@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { clean } from '../../report/summary.js'
-import { DumpError } from '../sql/dump.js'
+import { DumpError, MAX_DUMP_BYTES } from '../sql/dump.js'
 
 // Zip and tar backups (doc 12.7, T11). An archive comes from wherever the site was hosted, and a
 // hacked site's backup is the reason this source exists, so every entry is checked before anything
@@ -15,6 +15,7 @@ export type ArchiveCode =
   | 'SEC_ARCHIVE_TOO_LARGE'
   | 'SEC_ARCHIVE_TOO_MANY_FILES'
   | 'SEC_ARCHIVE_RATIO'
+  | 'SEC_ARCHIVE_OVERLAP'
 
 const NEXT: Record<ArchiveCode, string> = {
   SEC_ARCHIVE_PATH_TRAVERSAL: 'Backup plugins never write such names; the archive may have been tampered with. Use a backup you trust.',
@@ -23,6 +24,7 @@ const NEXT: Record<ArchiveCode, string> = {
   SEC_ARCHIVE_TOO_LARGE: 'Repack only the database and wp-content/uploads, or split the uploads into several archives.',
   SEC_ARCHIVE_TOO_MANY_FILES: 'Repack only the database and wp-content/uploads, or split the uploads into several archives.',
   SEC_ARCHIVE_RATIO: 'Real backups do not compress this well; the archive may be a zip bomb. Use a backup you trust.',
+  SEC_ARCHIVE_OVERLAP: 'Zip tools never write entries that share data; the archive may be a zip bomb. Use a backup you trust.',
 }
 
 /** A backup archive refused by a security rule. A DumpError, so every command reports it as a failed source. */
@@ -43,6 +45,8 @@ export interface ArchiveLimits {
   maxRatio: number
   /** The ratio is only judged past this many unpacked bytes: tiny files compress oddly. */
   ratioGraceBytes: number
+  /** Bytes of SQL dump candidates kept on disk at once while a tar is unpacked: the dump cap. */
+  maxDumpBytes: number
 }
 
 export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
@@ -50,6 +54,7 @@ export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
   maxTotalBytes: 64 * 1024 ** 3,
   maxRatio: 100,
   ratioGraceBytes: 1024 ** 2,
+  maxDumpBytes: MAX_DUMP_BYTES,
 }
 
 /** An entry name as it reads in messages: quoted, shortened, control and bidi characters replaced. */
@@ -77,9 +82,12 @@ export function entryPath(archive: string, raw: string): string {
   return parts.join('/')
 }
 
-// Device names Windows opens as devices whatever the folder or extension; and names it silently
+// Device names Windows opens as devices whatever the folder or extension, and names it silently
 // trims. Only checked for files written to disk (tar extraction), where they could misbehave.
-const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i
+// Windows reads the part before the first dot with trailing spaces trimmed, so `con .sql` and
+// `aux  .txt` are devices too; superscript digits count as digits (COM¹, LPT³). Colons never get
+// here: entryPath refuses them.
+const RESERVED = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$) *(\..*)?$/i
 
 /** The absolute path of a checked entry inside `root`; throws if it would not stay inside. */
 export function insideRoot(archive: string, root: string, rel: string): string {
@@ -114,6 +122,9 @@ export const overRatio = (unpacked: number, packed: number, limits: ArchiveLimit
 export const tooLarge = (archive: string, limits: ArchiveLimits) =>
   new ArchiveError('SEC_ARCHIVE_TOO_LARGE', archive, `it unpacks to over ${Math.floor(limits.maxTotalBytes / 1024 ** 2)} MB.`)
 
+export const dumpTooLarge = (archive: string, rel: string, limits: ArchiveLimits) =>
+  new ArchiveError('SEC_ARCHIVE_TOO_LARGE', archive, `its SQL dumps (up to ${shown(rel)}) unpack to over ${Math.floor(limits.maxDumpBytes / 1024 ** 2)} MB.`)
+
 export const tooMany = (archive: string, limits: ArchiveLimits) =>
   new ArchiveError('SEC_ARCHIVE_TOO_MANY_FILES', archive, `it has over ${limits.maxFiles} entries.`)
 
@@ -139,18 +150,28 @@ export function uploadsPart(rel: string): { prefix: string; rel: string } | unde
   return prefix !== undefined && rel.length > prefix.length ? { prefix, rel: rel.slice(prefix.length) } : undefined
 }
 
+/**
+ * How likely a candidate is to be the site dump; lower wins. Duplicator's name (shallowest first),
+ * then database.sql at the root, then the shallowest .sql. Shared by pickDump and the tar reader,
+ * which never keeps a candidate that can no longer win (SEC-03).
+ */
+export function dumpRank(rel: string): number {
+  const depth = rel.split('/').length
+  if (DUPLICATOR_DB.test(rel)) return depth
+  if (rel === 'database.sql') return 1e7
+  return 2e7 + depth
+}
+
 /** Picks the dump among candidate paths: Duplicator's name, then database.sql at the root, then a single shallowest .sql. */
 export function pickDump(archive: string, candidates: string[]): string {
-  const dup = candidates.filter((c) => DUPLICATOR_DB.test(c))
-  if (dup.length === 1) return dup[0] as string
-  const pool = dup.length > 1 ? dup : candidates.includes('database.sql') ? ['database.sql'] : candidates
-  if (pool.length === 0) {
+  if (candidates.length === 0) {
     throw new DumpError('DUMP_NO_WORDPRESS', `The backup ${clean(path.basename(archive))} has no SQL dump (.sql or .sql.gz) outside wp-content. An encrypted or files-only backup cannot be read.`)
   }
-  const depth = (p: string) => p.split('/').length
-  const min = Math.min(...pool.map(depth))
-  const top = pool.filter((p) => depth(p) === min)
-  if (top.length > 1) {
+  let best = Infinity
+  for (const c of candidates) best = Math.min(best, dumpRank(c))
+  const top = candidates.filter((c) => dumpRank(c) === best)
+  // Duplicates of database.sql are one name (the first wins); any other tie cannot be chosen.
+  if (top.length > 1 && top[0] !== 'database.sql') {
     throw new DumpError(
       'DUMP_INVALID',
       `The backup ${clean(path.basename(archive))} has several SQL dumps: ${top.slice(0, 5).map(shown).join(', ')}.\nExtract the right one and use a sql source with source.uploads pointing at the archive.`,

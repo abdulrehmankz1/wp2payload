@@ -8,16 +8,30 @@ import { ArchiveError, checkMode, entryPath, shown, type ArchiveLimits } from '.
 // directory is indexed once, and each entry is inflated only when it is read. Nothing is written to
 // disk. Names are decoded here, not by yauzl, so a hostile name gets a SEC_ARCHIVE_* code instead of
 // a generic parse error. yauzl checks every entry's real size against the declared one as it
-// streams, so declared sizes can be trusted for the caps.
+// streams, so declared sizes can be trusted for the caps. Entries whose data overlap (a zip bomb
+// that inflates the same bytes many times) refuse the archive.
+
+/** What is kept of a yauzl Entry: an index of up to a million entries holds only these fields. */
+export interface ZipEntry {
+  /** Offset of the local file header. */
+  offset: number
+  compressedSize: number
+  uncompressedSize: number
+  compressionMethod: number
+  generalPurposeBitFlag: number
+}
 
 export interface ZipIndex {
   file: string
   zip: ZipFile
   /** Regular files by checked path; the first of duplicate names wins. */
-  files: Map<string, Entry>
+  files: Map<string, ZipEntry>
 }
 
 const utf8 = new TextDecoder('utf-8', { fatal: true })
+
+/** The smallest local record: a 30-byte header (name and extra field may add more) and the data. */
+const LOCAL_HEADER = 30
 
 /**
  * The entry name. Zips flag UTF-8 names, or carry them in an Info-ZIP extra field; otherwise the
@@ -36,6 +50,25 @@ function entryName(e: Entry): string {
   return yauzl.getFileNameLowLevel(e.generalPurposeBitFlag, e.fileNameRaw, e.extraFields, true)
 }
 
+/**
+ * Refuses entries whose local records overlap. Each record takes at least 30 + compressedSize
+ * bytes from its offset, so a record that starts before the previous one ends shares its bytes:
+ * real zip tools never write that, overlap bombs (several entries over one deflate stream) do.
+ */
+function checkOverlap(file: string, starts: Float64Array, ends: Float64Array): void {
+  const order = new Uint32Array(starts.length)
+  for (let i = 0; i < order.length; i++) order[i] = i
+  order.sort((a, b) => (starts[a] as number) - (starts[b] as number))
+  for (let i = 1; i < order.length; i++) {
+    const prev = order[i - 1] as number
+    const cur = order[i] as number
+    if ((starts[cur] as number) < (ends[prev] as number)) {
+      // Entry numbers, not names: the index keeps no name for folders and skipped entries.
+      throw new ArchiveError('SEC_ARCHIVE_OVERLAP', file, `entries ${Math.min(prev, cur) + 1} and ${Math.max(prev, cur) + 1} of the zip share data.`)
+    }
+  }
+}
+
 export async function indexZip(file: string, limits: ArchiveLimits): Promise<ZipIndex> {
   let zip: ZipFile
   try {
@@ -46,19 +79,35 @@ export async function indexZip(file: string, limits: ArchiveLimits): Promise<Zip
   }
   // Errors reach the caller through the promise APIs; a stray one must not crash the process.
   zip.on('error', () => {})
-  const files = new Map<string, Entry>()
+  const files = new Map<string, ZipEntry>()
   try {
     // The count is in the end record: refuse before reading a single entry.
     if (zip.entryCount > limits.maxFiles) {
       throw new ArchiveError('SEC_ARCHIVE_TOO_MANY_FILES', file, `it has ${zip.entryCount} entries; the limit is ${limits.maxFiles}.`)
     }
+    // Every entry's record, folders and skipped names included: overlaps are judged over all of them.
+    const starts = new Float64Array(zip.entryCount)
+    const ends = new Float64Array(zip.entryCount)
+    let i = 0
     for await (const entry of zip.eachEntry()) {
       const raw = entryName(entry)
       const rel = entryPath(file, raw)
       checkMode(file, raw, entry.externalFileAttributes >>> 16)
+      starts[i] = entry.relativeOffsetOfLocalHeader
+      ends[i] = entry.relativeOffsetOfLocalHeader + LOCAL_HEADER + entry.compressedSize
+      i++
       if (/[/\\]$/.test(raw) || !rel) continue
-      if (!files.has(rel)) files.set(rel, entry)
+      if (!files.has(rel)) {
+        files.set(rel, {
+          offset: entry.relativeOffsetOfLocalHeader,
+          compressedSize: entry.compressedSize,
+          uncompressedSize: entry.uncompressedSize,
+          compressionMethod: entry.compressionMethod,
+          generalPurposeBitFlag: entry.generalPurposeBitFlag,
+        })
+      }
     }
+    checkOverlap(file, starts.subarray(0, i), ends.subarray(0, i))
   } catch (error) {
     zip.close()
     if (error instanceof DumpError) throw error
@@ -67,16 +116,44 @@ export async function indexZip(file: string, limits: ArchiveLimits): Promise<Zip
   return { file, zip, files }
 }
 
+const isEncrypted = (e: ZipEntry) => (e.generalPurposeBitFlag & 0x1) !== 0
+
 /** An entry wp2payload will read: refused up front if it is encrypted or packed in a way yauzl cannot unpack. */
-export function checkReadable(ix: ZipIndex, rel: string, e: Entry): void {
-  if (e.isEncrypted()) throw new DumpError('DUMP_INVALID', `The entry ${shown(rel)} is encrypted; encrypted backups cannot be read.`)
-  if (!e.canDecodeFileData()) throw new DumpError('DUMP_INVALID', `The entry ${shown(rel)} uses compression method ${e.compressionMethod}; only stored and deflated zip entries can be read.`)
+export function checkReadable(ix: ZipIndex, rel: string, e: ZipEntry): void {
+  if (isEncrypted(e)) throw new DumpError('DUMP_INVALID', `The entry ${shown(rel)} is encrypted; encrypted backups cannot be read.`)
+  if (e.compressionMethod !== 0 && e.compressionMethod !== 8) {
+    throw new DumpError('DUMP_INVALID', `The entry ${shown(rel)} uses compression method ${e.compressionMethod}; only stored and deflated zip entries can be read.`)
+  }
 }
 
-export const openZipEntry = (ix: ZipIndex, e: Entry): Promise<Readable> => ix.zip.openReadStreamPromise(e)
+/**
+ * The entry's content as a stream, from the kept fields: yauzl reads the local header to find the
+ * data, then inflates it (deflate) or reads it as is (stored, where yauzl has already checked that
+ * both sizes agree), checking the unpacked size as it streams.
+ */
+export function openZipEntry(ix: ZipIndex, e: ZipEntry): Promise<Readable> {
+  return new Promise((resolve, reject) => {
+    if (!ix.zip.isOpen) {
+      reject(new Error('closed'))
+      return
+    }
+    if (isEncrypted(e) || (e.compressionMethod !== 0 && e.compressionMethod !== 8)) {
+      reject(new Error(`unsupported zip entry (method ${e.compressionMethod})`))
+      return
+    }
+    // readLocalFileHeader reads only these two fields of the entry.
+    const located = { relativeOffsetOfLocalHeader: e.offset, compressedSize: e.compressedSize } as Entry
+    ix.zip.readLocalFileHeader(located, { minimal: true }, (error, header) => {
+      if (error) return reject(error)
+      ix.zip.openReadStreamLowLevel(header.fileDataStart, e.compressedSize, 0, e.compressedSize, e.compressionMethod === 8, e.uncompressedSize, (err, stream) =>
+        err ? reject(err) : resolve(stream),
+      )
+    })
+  })
+}
 
 /** A whole entry into memory, under `maxBytes` (checked before inflating, and again while streaming). */
-export async function readZipEntry(ix: ZipIndex, rel: string, e: Entry, maxBytes: number): Promise<Buffer> {
+export async function readZipEntry(ix: ZipIndex, rel: string, e: ZipEntry, maxBytes: number): Promise<Buffer> {
   if (e.uncompressedSize > maxBytes) throw new SecurityError('SEC_FILE_TOO_LARGE', `Media is ${e.uncompressedSize} bytes, over the ${maxBytes}-byte cap.`)
   let stream: Readable
   try {
