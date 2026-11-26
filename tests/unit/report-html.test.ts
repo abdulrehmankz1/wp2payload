@@ -203,6 +203,53 @@ describe('renderSecurityReportHtml', () => {
     expect(shown).not.toContain('pw')
   })
 
+  it('hides an address before clipping, so one cut at the limit does not leak partly', () => {
+    const r = sample()
+    // Clipping at 500 first would leave "john.doe@example.c…", which no longer looks like an address.
+    for (const pad of [480, 485, 490, 495, 499]) {
+      const detail = `${'x'.repeat(pad)} john.doe@example.com`
+      r.security.findings = [{ code: 'SEC_HIDDEN_LINKS', severity: 'high', action: 'removed', doc: 'post:1', detail }]
+      r.site = `${'s'.repeat(190)} jörg@bücher.de`
+      const html = renderSecurityReportHtml(r)
+      expect(html, String(pad)).not.toContain('john')
+      expect(html, String(pad)).not.toContain('jörg')
+      expect(html).not.toMatch(/@example/)
+    }
+  })
+
+  it('long text is still fast to clean and clip', () => {
+    const r = sample()
+    const words = ['a@'.repeat(500_000), `x@${'ü.'.repeat(500_000)}`, `${'a'.repeat(500_000)}@${'b-'.repeat(250_000)}`]
+    r.security.findings = words.map((detail, i) => ({ code: 'SEC_HIDDEN_TEXT', severity: 'low', action: 'removed', doc: `post:${i}`, detail }))
+    const t0 = performance.now()
+    const html = renderSecurityReportHtml(r)
+    expect(performance.now() - t0).toBeLessThan(5000)
+    expect(problems(html)).toEqual([])
+  })
+
+  it('lists the login accounts the run created, without email addresses', () => {
+    const m = new MemoryReport()
+    m.count('authors', 'created')
+    m.count('authors', 'created')
+    m.warning({ code: 'AUTHOR_ACCOUNT_CREATED', detail: 'User 7 (slug "seo-admin") got a login account in users. Check it is a real person before go-live', doc: 'author:7' })
+    m.warning({ code: 'AUTHOR_ACCOUNT_CREATED', detail: 'User 8 (slug "<b>x</b>") (eve@evil.example) got a login account in users', doc: 'author:8' })
+    const html = renderSecurityReportHtml(buildReport(m, { site: 'https://a.test', dryRun: false, startedAt: start }))
+    expect(problems(html)).toEqual([])
+    expect(html).toContain('<h2>Accounts created</h2>')
+    expect(html).toContain('These WordPress users got an account that can log in')
+    const cells = cellText(html)
+    expect(cells).toEqual(expect.arrayContaining(['author:7', 'author:8']))
+    expect(cells.some((c) => c.includes('slug "seo-admin"'))).toBe(true)
+    expect(html).toContain('slug &quot;&lt;b&gt;x&lt;/b&gt;&quot;')
+    expect(html).not.toContain('eve@')
+    // Still counted with the other warnings.
+    expect(html).toMatch(/<code>AUTHOR_ACCOUNT_CREATED<\/code><\/td><td class="num">2<\/td>/)
+
+    const dry = renderSecurityReportHtml(buildReport(m, { site: 'https://a.test', dryRun: true, startedAt: start }))
+    expect(dry).toContain('These WordPress users would get an account')
+    expect(renderSecurityReportHtml(sample())).not.toContain('Accounts created')
+  })
+
   it('survives a hand-edited report.json with the wrong types', () => {
     const broken = {
       version: 1, dryRun: 'yes', site: { toString: 1, valueOf: 1 }, startedAt: 5, durationSec: 'x',

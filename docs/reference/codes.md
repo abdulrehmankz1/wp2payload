@@ -99,6 +99,7 @@ Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of 
 | `AUTHOR_NOT_MIGRATED` | A user with no migrated content, left out on purpose (doc 12.9) |
 | `AUTHOR_NO_EMAIL` | Authors mapped into an auth collection: the user has no email in the source, so no account was created. Only the REST source with an Application Password that can list users reads emails |
 | `AUTHOR_EMAIL_IN_USE` | Authors mapped into an auth collection: an account that wp2payload did not create already has the user's email. It is never linked or changed; the user's content is written without an author |
+| `AUTHOR_ACCOUNT_CREATED` | Authors mapped into an auth collection: this run created (a dry run: would create) a login account for the user. One per account, with the WordPress ID and slug; no address unless `--include-pii`. On a hacked site the attacker's own user wrote the spam and gets an account too, so check each is a real person before go-live. Also shown on the summary's `accounts` line and under "Accounts created" in the HTML report; counts for `--strict` |
 | `AUTHOR_INVITE_FAILED` | `--invite-users`: the account was created but the password-set email could not be sent; the user can use "Forgot password" on the Payload login page. No address unless `--include-pii` |
 
 ## Errors

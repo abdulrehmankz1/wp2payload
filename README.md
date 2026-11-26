@@ -326,6 +326,14 @@ the `wpMeta` field. wp2payload notices the `auth` setting and then:
   (`AUTHOR_EMAIL_IN_USE`), and never migrates roles. Check your collection's access rules and any
   default role first: every invited user can log in.
 
+Every new account can log in, so `migrate` prints this as a warning before it starts. Only users
+who wrote migrated content get one, but on a hacked site the attacker's own user usually wrote the
+spam posts, so it qualifies too. Each account a run creates (or a dry run would create) is listed
+as an `AUTHOR_ACCOUNT_CREATED` warning with its WordPress ID and slug, counted on the `accounts`
+line of the summary (`--verbose` lists them) and listed under "Accounts created" in
+`security-report.html`. Check each one is a real person, and delete any that is not, before
+go-live. These warnings count for `--strict`.
+
 Emails come only from the REST source with an Application Password that can list users; export
 files and SQL dumps are read without them, so their users are reported as `AUTHOR_NO_EMAIL`.
 Reports leave out email addresses unless you pass `--include-pii`.
@@ -399,7 +407,9 @@ git:
   escaped and long values are shortened. Email addresses are never shown.
   `wp2payload report --html` writes it again from the last `report.json`, and
   `wp2payload report --html client/report.html` writes it somewhere else. The path is
-  relative to where you run the command, and it never overwrites a `.json` file.
+  relative to where you run the command and must end in `.html` or `.htm`, so a typo cannot
+  overwrite `report.json` or your source code. Accounts created in an auth collection have their
+  own section (see [Authors as login accounts](#authors-as-login-accounts)).
 - `scan.json` and `scan.html`: the last `scan` (see [Scanning a site](#scanning-a-site)).
 - `quarantine/`: removed fragments and rejected files, saved as inert text for review.
 - `state.json`: a cache of WordPress to Payload IDs. Deleting it loses nothing,

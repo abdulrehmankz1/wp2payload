@@ -94,7 +94,34 @@ describe('inviteCheck', () => {
 
   it('fails --invite-users without an email adapter, since Payload would log the addresses', () => {
     expect(inviteCheck(payload(true, false), config('users'), true)).toMatchObject({ status: 'fail' })
-    expect(inviteCheck(payload(true, true), config('users'), true)).toMatchObject({ status: 'ok' })
-    expect(inviteCheck(payload(true, false), config('users'), false)).toMatchObject({ status: 'ok', title: 'Authors become accounts in users' })
+  })
+
+  it('warns that authors in an auth collection become login accounts to review before go-live', () => {
+    for (const invite of [false, true]) {
+      const check = inviteCheck(payload(true, true), config('users'), invite)
+      expect(check).toMatchObject({ status: 'warn' })
+      expect(check?.title).toContain('login accounts in users')
+      expect(check?.detail).toMatch(/can log in/)
+      expect(check?.detail).toContain('AUTHOR_ACCOUNT_CREATED')
+      expect(check?.detail).toMatch(/before go-live/)
+    }
+  })
+})
+
+describe('accounts in the summary', () => {
+  const created = (wpId: number) => ({ code: 'AUTHOR_ACCOUNT_CREATED', detail: `User ${wpId} (slug "u${wpId}") got a login account in users`, doc: `author:${wpId}` })
+
+  it('counts the accounts created, or that a dry run would create', () => {
+    const real = formatSummary(report({ warnings: [created(1), created(2)] }), { color: false, reportPath: 'r.json' })
+    expect(real.join('\n')).toMatch(/ accounts +2 login accounts created; check each is a real person before go-live/)
+    const dry = formatSummary(report({ dryRun: true, warnings: [created(1)] }), { color: false, reportPath: 'r.json' })
+    expect(dry.join('\n')).toMatch(/ accounts +1 login account would be created/)
+    expect(formatSummary(report({}), { color: false, reportPath: 'r.json' }).join('\n')).not.toContain('accounts')
+  })
+
+  it('lists each account with --verbose', () => {
+    const lines = formatSummary(report({ warnings: [created(1), created(2)] }), { color: false, reportPath: 'r.json', verbose: true }).join('\n')
+    expect(lines).toContain('AUTHOR_ACCOUNT_CREATED (author:1): User 1 (slug "u1")')
+    expect(lines).toContain('AUTHOR_ACCOUNT_CREATED (author:2)')
   })
 })

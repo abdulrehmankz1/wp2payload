@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import type { CollectionSlug, Payload } from 'payload'
 import type { IRAuthor } from '../ir/types.js'
 import { redactEmails } from '../report/pii.js'
+import { ACCOUNT_CREATED } from '../report/summary.js'
 import { withRetry, type RetryOptions } from '../state/retry.js'
 import { resolve } from '../state/store.js'
 import type { LoaderContext } from './types.js'
@@ -43,7 +44,8 @@ export function authOf(payload: Payload, collection: CollectionSlug): { loginWit
  * Auth collection (opt-in, doc 2.6), detected from the Payload collection config: a new user also gets
  * the email from the source and a random 32-byte password that is never logged, reported or stored.
  * With `invite`, a real run then sends Payload's forgot-password email so the user sets their own.
- * Only users created in this run are invited, so re-runs (which update) never send again. An existing
+ * Only users created in this run are invited, so re-runs (which update) never send again. Each created
+ * account is reported as AUTHOR_ACCOUNT_CREATED (wpId and slug; email only with `includePii`). An existing
  * Payload account with the same email is never linked or changed (AUTHOR_EMAIL_IN_USE).
  */
 export async function loadAuthors(
@@ -108,6 +110,15 @@ export async function loadAuthors(
       }
       if (!ctx.dryRun) ctx.ids.set('author', a.wpId, res.id)
       ctx.report.count(PHASE, res.action)
+      // On a hacked site the attacker's own user wrote the spam, so it has content and gets an
+      // account like everyone else. Every account this run creates is listed for review.
+      if (auth && res.action === 'created') {
+        ctx.report.warning({
+          code: ACCOUNT_CREATED,
+          detail: `User ${a.wpId} (slug ${JSON.stringify(safe(a.slug).slice(0, 100))})${pii(email!)} ${ctx.dryRun ? 'would get' : 'got'} a login account in ${collection}. Check it is a real person before go-live`,
+          doc: `author:${a.wpId}`,
+        })
+      }
       if (invitations && res.action === 'created') {
         if (ctx.dryRun) invitations.sent++
         else await invite(ctx, collection, a.wpId, email!, invitations, pii, safe)

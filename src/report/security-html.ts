@@ -1,6 +1,6 @@
 import { STATE_DIR } from '../state/store.js'
 import { cards, count, esc, MAX_TEXT, renderPage, SEVERITIES, sevClass, table } from './html.js'
-import { describeFindings, formatDuration } from './summary.js'
+import { ACCOUNT_CREATED, describeFindings, formatDuration } from './summary.js'
 import type { CountAction, ReportJson, SecurityFinding, Severity } from './types.js'
 
 // The migration's security report as one self-contained HTML page (doc 12.11): a client
@@ -46,6 +46,7 @@ export function renderSecurityReportHtml(input: ReportJson, opts: { version?: st
   }
   const warnings = arr(r['warnings'])
   const errors = arr(r['errors'])
+  const accounts = warnings.map(obj).filter((w): w is Record<string, unknown> => w?.['code'] === ACCOUNT_CREATED)
 
   const kind = stopped ? 'Migration stopped early' : dryRun ? 'Dry run, nothing was written' : 'Migration'
   const started = text(r['startedAt'], 40)
@@ -91,6 +92,10 @@ ${table(['Phase', ...ACTIONS], phases(obj(r['summary']) ?? {}).map(([phase, coun
     ...ACTIONS.map((a) => `<td class="num">${count(counts[a])}</td>`),
   ]), 'No items processed.')}
 ${redirects(obj(r['redirects']))}
+${accounts.length ? `
+<h2>Accounts created</h2>
+<p>${dryRun ? 'These WordPress users would get' : 'These WordPress users got'} an account that can log in to the new site. On a hacked site the attacker's own user usually wrote the spam, so it gets one too. Check each is a real person before go-live and delete any that is not.</p>
+${table(['User', 'Detail'], accounts.map((a) => [`<td><code>${esc(text(a['doc'], 100))}</code></td>`, `<td>${esc(text(a['detail'], MAX_TEXT))}</td>`]), '', 'All are in report.json.')}` : ''}
 
 <h2>Warnings</h2>
 ${table(['Code', 'Count'], byCode(warnings), 'No warnings.', 'All are in report.json.')}
@@ -174,8 +179,8 @@ const obj = (v: unknown): Record<string, unknown> | undefined => (typeof v === '
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const str = (v: unknown): string => (typeof v === 'string' ? v : typeof v === 'number' && Number.isFinite(v) ? String(v) : '')
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-/** A string field, clipped, with email addresses hidden. */
+/** A string field with email addresses hidden, then clipped: clipping first could cut an address so it no longer matches. */
 const text = (v: unknown, max: number): string => {
-  const s = str(v)
-  return hideEmails(s.length > max ? `${s.slice(0, max)}…` : s)
+  const s = hideEmails(str(v))
+  return s.length > max ? `${s.slice(0, max)}…` : s
 }
