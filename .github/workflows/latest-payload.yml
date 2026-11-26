@@ -1,0 +1,79 @@
+name: Latest Payload
+
+# Doc 1.9 and 2.11: a weekly run against the latest Payload release, so a Payload change that
+# breaks wp2payload shows up before users hit it. Payload and @payloadcms/* are upgraded in the
+# runner only; the lockfile is never committed. A failed scheduled run opens (or comments on)
+# one tracking issue.
+on:
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Latest Payload (${{ matrix.db }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [sqlite, mongodb]
+    env:
+      MONGO_IMAGE: mongo:8.0.38@sha256:479e85ced54ffb8a40dade1dcde2da2a9ae858515b9415e9cc54bfb8f0575d01
+      WP2P_TEST_DB: ${{ matrix.db }}
+      WP2P_TEST_MONGO_URL: mongodb://127.0.0.1:27017/?replicaSet=rs0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Upgrade payload and @payloadcms/* to their latest release (not committed)
+        run: pnpm up --latest payload '@payloadcms/*'
+      - name: Versions under test
+        run: pnpm ls payload '@payloadcms/*' --depth 0
+      - run: pnpm typecheck
+      - run: pnpm test:unit
+      - name: Start MongoDB (single-node replica set)
+        if: matrix.db == 'mongodb'
+        run: |
+          docker run --detach --name mongo --publish 127.0.0.1:27017:27017 "$MONGO_IMAGE" --replSet rs0 --bind_ip_all
+          for _ in $(seq 1 60); do
+            docker exec mongo mongosh --quiet --eval 'db.adminCommand({ ping: 1 })' > /dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval 'rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "127.0.0.1:27017" }] })'
+          docker exec mongo mongosh --quiet --eval 'for (let i = 0; !db.hello().isWritablePrimary; i++) { if (i > 120) quit(1); sleep(500) }'
+      - run: pnpm test:int
+      - name: Stop MongoDB
+        if: always() && matrix.db == 'mongodb'
+        run: docker rm --force mongo
+
+  # Scheduled runs only: a manual run is watched by whoever started it.
+  report:
+    name: Report failure
+    needs: test
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title='Weekly run against the latest Payload failed'
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -n 1)
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Failed again: $RUN_URL"
+          else
+            gh issue create --title "$title" --body "The scheduled run of the Latest Payload workflow failed: $RUN_URL. Check whether a new payload or @payloadcms/* release breaks wp2payload."
+          fi
