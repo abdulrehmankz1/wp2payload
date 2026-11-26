@@ -216,6 +216,26 @@ describe('runPipeline', () => {
     expect(await count('posts', site)).toBe(0)
   })
 
+  it('--since writes only documents changed since then, and approvals let reviewed content through', async () => {
+    const origin = 'https://since.test'
+    const map = '<iframe src="https://maps.example.com/embed?x=1"></iframe>'
+    const docs = [
+      doc(origin, 100, 'post', { modifiedAt: '2026-10-01T00:00:00.000Z', html: `<!-- wp:html -->${map}<!-- /wp:html -->` }),
+      doc(origin, 101, 'post', { modifiedAt: '2026-11-02T09:30:00.000Z' }),
+    ]
+    const { site, run } = setup(origin, docs)
+    const first = await run({ since: new Date('2026-11-01T00:00:00Z') })
+    expect(first.summary['documents']).toMatchObject({ created: 1, skipped: 1 })
+    expect(await count('posts', site)).toBe(1)
+
+    const blocked = await run({})
+    expect(blocked.security.findings.map((f) => f.code)).toContain('SEC_IFRAME_UNKNOWN_HOST')
+    const allowed = await run({ approvals: { hosts: ['maps.example.com'], fragments: new Set() } })
+    expect(allowed.security.findings.map((f) => f.code)).not.toContain('SEC_IFRAME_UNKNOWN_HOST')
+    const post = (await t.payload.find({ collection: 'posts', where: { 'wpMeta.wpId': { equals: 100 } }, overrideAccess: true, depth: 0 })).docs[0]!
+    expect(JSON.stringify(post.content)).toContain('https://maps.example.com/embed?x=1')
+  })
+
   it('stops a phase when more than 10% of it fails, keeping state for a resume', async () => {
     const origin = 'https://four.test'
     // `notes` requires `summary`, which WordPress never provides: every write fails.

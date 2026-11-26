@@ -6,6 +6,7 @@ import type { Env } from '../config/types.js'
 import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
 import type { Extractor } from '../ir/types.js'
 import { siteKey } from '../loaders/wpmeta.js'
+import { loadApprovals } from '../review/store.js'
 import { DownloadCache } from '../migrate/download-cache.js'
 import { documentTypes, isFirstRun, OnlyError, runPipeline, selectPhases, type Phase } from '../migrate/run.js'
 import { StateCorruptError } from '../state/store.js'
@@ -26,6 +27,8 @@ export interface MigrateOptions {
   limit?: number
   concurrency?: number
   fresh?: boolean
+  /** Write only documents modified at or after this time. */
+  since?: Date
   strict?: boolean
   failOnSecurity?: Severity
   allowSvg?: boolean
@@ -112,6 +115,10 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     if (failed.length) return 1
 
     const site = siteKey(siteUrl)
+    const approvals = await loadApprovals(cwd)
+    const approved = approvals.fragments.size + approvals.hosts.length
+    if (approved) log(formatLine('ok', `Using ${approved} approval${approved === 1 ? '' : 's'} from wp2payload review`))
+    if (opts.since) log(formatLine('ok', `Writing only documents changed since ${opts.since.toISOString()}`))
     const pipeline = (dryRun: boolean) =>
       runPipeline({
         root: cwd,
@@ -120,6 +127,8 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         extractor: source.extractor,
         site,
         siteUrl,
+        approvals,
+        ...(opts.since ? { since: opts.since } : {}),
         trustSiteHost: source.trustSiteHost,
         ...(source.readLocalMedia ? { readLocalMedia: source.readLocalMedia } : {}),
         dryRun,

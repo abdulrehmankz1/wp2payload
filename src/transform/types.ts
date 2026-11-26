@@ -35,6 +35,8 @@ export interface SanitizeOptions {
   externalLinkRel: string
   /** Report SEC_SPAM_KEYWORDS here. The pipeline turns it off per block and checks the whole document once. */
   spam?: boolean
+  /** sha256 of quarantined fragments a person approved in `wp2payload review`; they are kept (still sanitized). */
+  approvedFragments?: ReadonlySet<string>
 }
 
 /** A removed fragment to write to quarantine (doc 12.10). The caller writes it. */

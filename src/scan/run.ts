@@ -4,6 +4,7 @@ import type { IRMedia, SourceInfo } from '../ir/types.js'
 import { flagLinkHeavy } from '../migrate/guards.js'
 import { MemoryReport, type Issue, type SecurityFinding, type Severity } from '../report/types.js'
 import { MediaError, SecurityError, inspectMedia, safeDownload } from '../security/index.js'
+import type { Approvals } from '../review/store.js'
 import { secureDocument } from '../transform/index.js'
 
 // `wp2payload scan` (doc F18): the security and content health of a source, without Payload and
@@ -22,6 +23,8 @@ export interface ScanOptions {
   concurrency?: number
   allowSvg?: boolean
   allowEmbedHosts?: readonly string[]
+  /** Decisions from `wp2payload review` in this folder. */
+  approvals?: Approvals
   onPhase?: (phase: 'media' | 'documents', status: 'start' | 'done', count: number) => void
 }
 
@@ -77,7 +80,8 @@ export async function runScan(o: ScanOptions): Promise<ScanReport> {
   for await (const doc of o.source.extractor.documents()) {
     const { externalLinks } = await secureDocument(doc, {
       siteOrigin: o.siteUrl,
-      embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? [])],
+      embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? []), ...(o.approvals?.hosts ?? [])],
+      ...(o.approvals?.fragments.size ? { approvedFragments: o.approvals.fragments } : {}),
       externalLinkRel: sec.externalLinkRel,
       transformers: o.config.transformers,
       report,

@@ -92,6 +92,7 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `doctor` | Checks Node.js, your Payload installation and the WordPress site or export file. Writes nothing. |
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
 | `scan [target]` | Security and content health report of a site, without migrating. Needs no Payload project (see [Scanning a site](#scanning-a-site)). |
+| `review` | Goes through quarantined items to approve or reject them; approvals apply on the next run (see [Reviewing quarantine](#reviewing-quarantine)). |
 | `report` | Prints the last migration report again (`--json` for the raw file). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
 
@@ -108,6 +109,7 @@ folder above that has `wp2payload.config.ts`, without going past your project's 
 | `--limit <n>` | Write only the first n documents (all are still read, so links resolve) |
 | `--concurrency <n>` | Parallel media downloads (default 4) |
 | `--fresh` | Ignore the local ID cache; still upserts, so no duplicates |
+| `--since <date>` | Write only documents changed since this date or time (e.g. `2026-11-05`, midnight UTC), for a launch-day sync after a content freeze |
 | `--strict` | Exit with code 3 when there are warnings or errors |
 | `--fail-on-security <level>` | Exit with code 4 when findings at `low`, `medium` or `high` exist |
 | `--allow-svg` | Accept SVG uploads after a strict check |
@@ -283,6 +285,34 @@ Pages built with Elementor, Divi, WPBakery or Beaver Builder keep their text, im
 links but not their layout; shortcodes stay as text; other post types (such as WooCommerce
 products) are not migrated yet. Each of these is listed in the report, and `doctor` names the
 post types it will skip.
+
+## Reviewing quarantine
+
+Removed content and rejected files are never imported on their own. `wp2payload review` goes
+through them one by one in the terminal (or `--list`, then `--approve <id>` / `--reject <id>`) and
+saves each decision in `.wp2payload/review.json`. Only two kinds of item can be approved, because
+they are often false positives and are harmless once sanitized:
+
+- an iframe from a host not in `security.embedHosts` (an embedded map, say): its host is trusted on
+  the next run, so its iframes become embed blocks;
+- a hidden block with links (an accordion or a tab panel): that exact block is kept on the next run,
+  still sanitized, and visible in Payload.
+
+Scripts, event handlers, dangerous URLs and rejected uploads can only be rejected. Run
+`migrate` again after approving; the approvals are listed as allowed findings in the report.
+
+## Launch-day sync
+
+When the old site keeps changing until launch, migrate once ahead of time, freeze content, then
+copy only what changed during the freeze:
+
+```bash
+npx wp2payload migrate --since 2026-11-05
+```
+
+Media, terms and authors are checked as on every run (already migrated items cost a lookup,
+not a download); only documents modified before the date are left as they are. Content deleted on
+the old site during the freeze is not deleted in Payload.
 
 ## Scanning a site
 

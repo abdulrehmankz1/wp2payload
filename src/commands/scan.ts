@@ -5,6 +5,7 @@ import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, resolveConfig, type Resol
 import type { Env } from '../config/types.js'
 import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
 import { ensureWorkDir } from '../migrate/workdir.js'
+import { loadApprovals } from '../review/store.js'
 import { SEVERITY_RANK } from '../report/build.js'
 import { clean, formatDuration, issueLines, securityLines } from '../report/summary.js'
 import type { Severity } from '../report/types.js'
@@ -103,6 +104,7 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       allowSvg: opts.allowSvg === true,
       allowEmbedHosts: opts.allowEmbedHosts ?? [],
+      approvals: await loadApprovals(cwd),
       onPhase: (phase, status) => {
         if (status === 'start') log(`${phase}...`)
       },

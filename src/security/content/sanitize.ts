@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { isComment, isTag, isText, type AnyNode, type Element } from 'domhandler'
 import { parseDocument } from 'htmlparser2'
 import sanitizeHtml, { type IOptions } from 'sanitize-html'
@@ -57,6 +58,8 @@ interface Scan {
   /** Findings about content that stays in the source (attributes the allowlist drops, kept hidden text). */
   kept: Finding[]
   keptQuarantine: QuarantineFragment[]
+  /** Source ranges of approved fragments kept in this pass (for the next pass to recognise them). */
+  approved: [number, number][]
 }
 
 /** Internal limits; exposed for tests only. */
@@ -94,6 +97,12 @@ function pushChildren(stack: AnyNode[], node: AnyNode): void {
  * Source range of a node. An element closed implicitly (`<p>a<div>`) can report an end offset
  * past its next sibling's start, so the end is clamped to the next sibling and the parent.
  */
+/** sha256 of an element's source text, as its quarantine file stores it (doc 12.10). */
+function fragmentHash(src: string, el: AnyNode): string {
+  const [start, end] = range(el, src.length)
+  return createHash('sha256').update(src.slice(start, end + 1)).digest('hex')
+}
+
 function range(node: AnyNode, srcLength: number): [number, number] {
   const start = node.startIndex ?? 0
   let end = node.endIndex ?? srcLength - 1
@@ -184,7 +193,7 @@ function frameTarget(src: string | undefined): string {
 
 function scan(src: string, opts: SanitizeOptions, mode: Mode): Scan {
   const dom = parseDocument(src, PARSE)
-  const out: Scan = { edits: [], removed: [], kept: [], keptQuarantine: [] }
+  const out: Scan = { edits: [], removed: [], kept: [], keptQuarantine: [], approved: [] }
   const finding = (code: Finding['code'], severity: Finding['severity'], action: Finding['action'], detail: string): Finding =>
     ({ code, severity, action, doc: opts.doc, detail })
   const flagHiddenText = mode === 'document' || opts.spam !== false
@@ -261,10 +270,14 @@ function scan(src: string, opts: SanitizeOptions, mode: Mode): Scan {
       if (why) {
         // Outermost hidden containers are disjoint subtrees, so counting here stays linear.
         const links = countLinks(el)
-        if (links > 0) {
+        // A person approved this exact fragment in `wp2payload review`: keep it, still sanitized below.
+        const approved = links > 0 && opts.approvedFragments !== undefined && opts.approvedFragments.has(fragmentHash(src, el))
+        if (links > 0 && !approved) {
           cut(el, finding('SEC_HIDDEN_LINKS', 'high', 'quarantined', `${plural(links, 'link')} in hidden <${name}> (${why})`))
           continue
         }
+        if (approved) out.approved.push(range(el, src.length))
+        if (approved) out.kept.push(finding('SEC_HIDDEN_LINKS', 'low', 'allowed', `${plural(links, 'link')} in hidden <${name}> (${why}), kept: approved in review`))
         inHidden = true
         const text = textOf(el).replace(/\s+/g, ' ').trim()
         if (text && flagHiddenText) {
@@ -337,8 +350,9 @@ function prescan(html: string, opts: SanitizeOptions, mode: Mode, limits: ScanLi
     return { src: '', findings: [f], quarantine: [{ html, finding: f }] }
   }
   let src = html
+  let passOpts = opts
   for (let pass = 0; pass < maxPasses; pass++) {
-    const s = scan(src, opts, mode)
+    const s = scan(src, passOpts, mode)
     for (const q of s.removed) {
       findings.push(q.finding)
       quarantine.push(q)
@@ -349,6 +363,15 @@ function prescan(html: string, opts: SanitizeOptions, mode: Mode, limits: ScanLi
       findings.push(...s.kept)
       quarantine.push(...s.keptQuarantine)
       return { src, findings, quarantine }
+    }
+    // An approved fragment that lost a script this pass is still the approved fragment next pass.
+    if (s.approved.length && passOpts.approvedFragments) {
+      const next = new Set(passOpts.approvedFragments)
+      for (const [start, end] of s.approved) {
+        const inside = s.edits.filter((e) => e.start >= start && e.end <= end).map((e) => ({ ...e, start: e.start - start, end: e.end - start }))
+        next.add(createHash('sha256').update(applyEdits(src.slice(start, end + 1), inside)).digest('hex'))
+      }
+      passOpts = { ...passOpts, approvedFragments: next }
     }
     src = applyEdits(src, s.edits)
   }

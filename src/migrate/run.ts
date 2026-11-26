@@ -14,6 +14,7 @@ import { MemoryReport, type ReportJson } from '../report/types.js'
 import { resolve, StateStore } from '../state/store.js'
 import { errorRateExceeded, flagLinkHeavy } from './guards.js'
 import { DocumentSpill, spillPath } from './spill.js'
+import type { Approvals } from '../review/store.js'
 import { ensureWorkDir } from './workdir.js'
 
 export const PHASES = ['media', 'terms', 'authors', 'documents', 'redirects'] as const
@@ -36,6 +37,10 @@ export interface PipelineOptions {
    * allowlisted: https, and never a private address.
    */
   trustSiteHost?: boolean
+  /** Only documents modified at or after this time are written (content freeze, doc 13.1). */
+  since?: Date
+  /** Decisions from `wp2payload review`: hosts trusted for iframes and fragments kept. */
+  approvals?: Approvals
   /** Backup sources: reads local media (from the uploads folder or the backup archive). */
   readLocalMedia?: (localPath: string, maxBytes: number) => Promise<Buffer>
   dryRun: boolean
@@ -176,14 +181,16 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
       const entries = spill!.entries
       let processed = 0
       const sec = o.config.security
-      await loadDocuments(ctx, () => selected(spill!.read(), types, o.limit), {
+      const unchanged = () => report.count('documents', 'skipped')
+      await loadDocuments(ctx, () => selected(spill!.read(), types, o.limit, o.since, unchanged), {
         targets,
         transform: {
           siteOrigin: siteUrl,
-          embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? [])],
+          embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? []), ...(o.approvals?.hosts ?? [])],
           externalLinkRel: sec.externalLinkRel,
           transformers: o.config.transformers,
           root: o.root,
+          ...(o.approvals?.fragments.size ? { approvedFragments: o.approvals.fragments } : {}),
         },
         media,
         documents: entries,
@@ -290,11 +297,21 @@ export class OnlyError extends Error {
   }
 }
 
-/** Document types chosen with --only, then the first `limit` of them. */
-async function* selected(docs: AsyncIterable<IRDocument>, types: Set<string> | undefined, limit?: number): AsyncIterable<IRDocument> {
+/** Document types chosen with --only, changed since --since, then the first `limit` of them. */
+async function* selected(
+  docs: AsyncIterable<IRDocument>,
+  types: Set<string> | undefined,
+  limit?: number,
+  since?: Date,
+  unchanged?: () => void,
+): AsyncIterable<IRDocument> {
   let n = 0
   for await (const d of docs) {
     if (types && !types.has(d.type)) continue
+    if (since && Date.parse(d.modifiedAt) < since.getTime()) {
+      unchanged?.()
+      continue
+    }
     if (limit !== undefined && n >= limit) return
     n++
     yield d

@@ -54,6 +54,12 @@ program
   })
 
 const list = (value: string, prev: string[] = []) => [...prev, ...value.split(',').map((s) => s.trim()).filter(Boolean)]
+// A date (2026-11-05, midnight UTC) or a full ISO time.
+const sinceDate = (value: string) => {
+  const t = /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:?\d{2})?)?$/.test(value.trim()) ? Date.parse(value.trim()) : NaN
+  if (Number.isNaN(t)) throw new InvalidArgumentError('--since expects a date like 2026-11-05 or 2026-11-05T09:00:00Z')
+  return new Date(t)
+}
 const positiveInt = (flag: string) => (value: string) => {
   const n = Number(value)
   if (!Number.isInteger(n) || n < 1) throw new InvalidArgumentError(`${flag} expects a whole number of 1 or more`)
@@ -69,6 +75,7 @@ program
   .option('--limit <n>', 'write only the first n documents (all are still read, for links)', positiveInt('--limit'))
   .option('--concurrency <n>', 'parallel media downloads (default 4)', positiveInt('--concurrency'))
   .option('--fresh', 'ignore local state; still upserts, so no duplicates')
+  .option('--since <date>', 'write only documents changed since this date (content freeze), e.g. 2026-11-05', sinceDate)
   .option('--strict', 'exit with code 3 if there are any warnings')
   .addOption(new Option('--fail-on-security <level>', 'exit with code 4 if findings at or above this level exist').choices(['low', 'medium', 'high']))
   .option('--allow-svg', 'accept SVG uploads after a strict check')
@@ -86,6 +93,7 @@ program
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       fresh: opts.fresh === true,
+      ...(opts.since ? { since: opts.since } : {}),
       strict: opts.strict === true,
       ...(opts.failOnSecurity ? { failOnSecurity: opts.failOnSecurity } : {}),
       allowSvg: opts.allowSvg === true,
@@ -143,6 +151,24 @@ interface ScanCliOptions {
 }
 
 program
+  .command('review')
+  .description('Go through quarantined items and approve or reject them; approvals apply on the next run')
+  .option('--list', 'list every quarantined item with its status')
+  .option('--approve <id>', 'approve an item by its id from --list (repeatable)', list)
+  .option('--reject <id>', 'reject an item by its id from --list (repeatable)', list)
+  .option('--all', 'also go through items that already have a decision')
+  .action(async (opts: { list?: boolean; approve?: string[]; reject?: string[]; all?: boolean }) => {
+    const { runReview } = await import('./commands/review.js')
+    process.exitCode = await runReview({
+      cwd: root,
+      list: opts.list === true,
+      ...(opts.approve ? { approve: opts.approve } : {}),
+      ...(opts.reject ? { reject: opts.reject } : {}),
+      all: opts.all === true,
+    })
+  })
+
+program
   .command('report')
   .description('Print the last migration report again')
   .option('--json', 'print report.json instead of the summary')
@@ -160,6 +186,7 @@ program
 
 interface MigrateCliOptions {
   config?: string
+  since?: Date
   dryRun?: boolean
   only?: string[]
   limit?: number
