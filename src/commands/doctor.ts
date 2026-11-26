@@ -10,6 +10,8 @@ import { DumpError, SqlExtractor } from '../extractors/sql/index.js'
 import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
 import type { SourceInfo } from '../ir/types.js'
 import { clean } from '../report/summary.js'
+import { accountsCheck, type AccountsCheck } from '../payload/accounts.js'
+import { loadPayloadConfig } from '../payload/boot.js'
 import { formatLine } from '../ui/output.js'
 
 export interface DoctorOptions {
@@ -21,6 +23,30 @@ export interface DoctorOptions {
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
   createWxrExtractor?: (file: string) => Pick<WxrExtractor, 'probe'>
   createSqlExtractor?: (file: string, tablePrefix: string | undefined) => Pick<SqlExtractor, 'probe'>
+  /** Reads the user's Payload config without starting Payload (tests inject one). */
+  loadPayloadConfig?: (cwd: string, env: Env) => Promise<{ collections: readonly { slug: string; auth?: unknown }[] }>
+}
+
+const defaultPayloadConfig: NonNullable<DoctorOptions['loadPayloadConfig']> = async (cwd, env) =>
+  (await loadPayloadConfig(env['PAYLOAD_CONFIG_PATH'] ? { cwd, configPath: env['PAYLOAD_CONFIG_PATH'] } : { cwd })).config
+
+/**
+ * SEC-01: the same account check migrate runs before writing, from the Payload config alone (doctor
+ * never connects to the database). Exit code 2 when authors would become login accounts unasked.
+ */
+async function checkAccounts(config: ResolvedConfig, opts: DoctorOptions, payloadOk: boolean): Promise<AccountsCheck[]> {
+  if (config.collections['author'] === undefined && !config.authors.createAccounts) return []
+  let collections: readonly { slug: string; auth?: unknown }[]
+  try {
+    ;({ collections } = await (opts.loadPayloadConfig ?? defaultPayloadConfig)(opts.cwd ?? process.cwd(), opts.env ?? process.env))
+  } catch (error) {
+    // A failed Payload check already says what to fix first.
+    if (!payloadOk) return []
+    const reason = (error instanceof Error ? error.message : String(error)).split('\n')[0]
+    return [{ status: 'warn', title: 'Could not read the Payload config, so author accounts were not checked', detail: `${reason}\nmigrate runs this check before it writes anything.` }]
+  }
+  const check = accountsCheck(config, (slug) => Boolean(collections.find((c) => c.slug === slug)?.auth), { inviteUsers: false })
+  return check ? [check] : []
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
@@ -178,7 +204,8 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
 export async function runDoctor(opts: DoctorOptions = {}): Promise<number> {
   const cwd = opts.cwd ?? process.cwd()
   const log = opts.log ?? console.log
-  const results: CheckResult[] = [checkNodeVersion(), await checkPayloadInstalled(cwd)]
+  const payloadCheck = await checkPayloadInstalled(cwd)
+  const results: CheckResult[] = [checkNodeVersion(), payloadCheck]
   let exitCode = 0
 
   const configFile = opts.configPath ?? DEFAULT_CONFIG_FILE
@@ -192,6 +219,9 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<number> {
     try {
       const config = await loadConfig(configFile, cwd, opts.env ?? process.env)
       results.push({ status: 'ok', title: `Config ${configFile}` }, ...(await checkSource(config, opts)))
+      const accounts = await checkAccounts(config, opts, payloadCheck.status === 'ok')
+      results.push(...accounts)
+      if (accounts.some((a) => a.exitCode === 2)) exitCode = 2
     } catch (error) {
       if (!(error instanceof ConfigError)) throw error
       results.push({ status: 'fail', title: 'Invalid configuration', detail: error.message })

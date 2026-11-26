@@ -47,6 +47,11 @@ export interface ReportJson {
   redirects?: { count: number; conflicts: number; file?: string }
   /** `--invite-users` into an auth collection: password-set emails sent (a dry run: would send) and failed. No addresses. */
   invitations?: { sent: number; failed: number }
+  /**
+   * Safety defaults this run loosened by an explicit option (doc 12.2 principle 6), e.g.
+   * `authors.createAccounts` when authors became login accounts. Absent when there were none.
+   */
+  optIns?: { option: string; detail: string }[]
   security: { summary: Record<Severity, number>; findings: SecurityFinding[] }
   /** Set when the run stopped early (error-rate threshold, fatal error). */
   stopped?: { phase: string; reason: string }

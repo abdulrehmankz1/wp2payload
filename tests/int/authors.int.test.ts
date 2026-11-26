@@ -68,7 +68,10 @@ describe('loadAuthors', () => {
   })
 })
 
-// Doc 2.6: authors mapped into an auth collection (opt-in). A stub adapter records every email; nothing is sent.
+// Doc 2.6, SEC-01: authors mapped into an auth collection, with the authors.createAccounts opt-in.
+// A stub adapter records every email; nothing is sent.
+const OPT_IN = { createAccounts: true } as const
+
 describe('loadAuthors into an auth collection', () => {
   let u: TestPayload
   const sent: { to: string; subject: string }[] = []
@@ -135,10 +138,24 @@ describe('loadAuthors into an auth collection', () => {
       .docs[0] as Record<string, unknown> | undefined
   const total = async (collection: string) => (await u.payload.count({ collection: collection as never, overrideAccess: true })).totalDocs
 
+  it('creates no account and writes nothing without authors.createAccounts, dry run or not', async () => {
+    reset()
+    const n = await total('members')
+    for (const dryRun of [false, true]) {
+      const a = ctxFor('https://users0.test', 'members', dryRun)
+      await expect(loadAuthors(a.ctx, people('0-'), { invite: true })).rejects.toThrow(/authors\.createAccounts is not set; no login accounts were created/)
+      expect(a.report.summary['authors']).toBeUndefined()
+      expect(a.report.warnings).toEqual([])
+    }
+    expect(await total('members')).toBe(n)
+    expect(sent).toEqual([])
+    expect(passwords).toEqual([])
+  })
+
   it('creates accounts with the email and a random 32-byte password, and sends nothing without invite', async () => {
     reset()
     const a = ctxFor('https://users1.test', 'members')
-    expect(await loadAuthors(a.ctx, people('1-'))).toEqual({ auth: true })
+    expect(await loadAuthors(a.ctx, people('1-'), OPT_IN)).toEqual({ auth: true })
     expect(a.report.summary['authors']).toEqual({ created: 2 })
     expect(sent).toEqual([])
     expect(await find('members', '1-ann@example.com')).toMatchObject({ name: 'Ann', slug: 'ann', wpMeta: { site: 'https://users1.test', wpId: 1 } })
@@ -154,12 +171,12 @@ describe('loadAuthors into an auth collection', () => {
   it('--invite-users emails each new user once, and a re-run sends nothing', async () => {
     reset()
     const a = ctxFor('https://users2.test', 'members')
-    expect(await loadAuthors(a.ctx, people('2-'), { invite: true })).toEqual({ auth: true, invitations: { sent: 2, failed: 0 } })
+    expect(await loadAuthors(a.ctx, people('2-'), { ...OPT_IN, invite: true })).toEqual({ auth: true, invitations: { sent: 2, failed: 0 } })
     expect(sent.map((m) => m.to).sort()).toEqual(['2-ann@example.com', '2-bob@example.com'])
     expect((await find('members', '2-ann@example.com'))?.['resetPasswordToken']).toBeTruthy()
 
     const b = ctxFor('https://users2.test', 'members')
-    expect(await loadAuthors(b.ctx, people('2-'), { invite: true })).toEqual({ auth: true, invitations: { sent: 0, failed: 0 } })
+    expect(await loadAuthors(b.ctx, people('2-'), { ...OPT_IN, invite: true })).toEqual({ auth: true, invitations: { sent: 0, failed: 0 } })
     expect(b.report.summary['authors']).toEqual({ updated: 2 })
     expect(sent).toHaveLength(2)
     // An update never sets a password.
@@ -171,7 +188,7 @@ describe('loadAuthors into an auth collection', () => {
     reset()
     const n = await total('members')
     const d = ctxFor('https://users3.test', 'members', true)
-    expect(await loadAuthors(d.ctx, people('3-'), { invite: true })).toEqual({ auth: true, invitations: { sent: 2, failed: 0 } })
+    expect(await loadAuthors(d.ctx, people('3-'), { ...OPT_IN, invite: true })).toEqual({ auth: true, invitations: { sent: 2, failed: 0 } })
     expect(d.report.summary['authors']).toEqual({ created: 2 })
     expect(sent).toEqual([])
     expect(await total('members')).toBe(n)
@@ -191,7 +208,7 @@ describe('loadAuthors into an auth collection', () => {
         { wpId: 7, slug: 'nomail', displayName: 'No Mail' },
         { wpId: 8, slug: 'mallory', displayName: 'Mallory', email: 'OWNER@example.com' },
       ],
-      { invite: true },
+      { ...OPT_IN, invite: true },
     )
     expect(res.invitations).toEqual({ sent: 0, failed: 0 })
     expect(a.report.summary['authors']).toEqual({ skipped: 2 })
@@ -207,7 +224,7 @@ describe('loadAuthors into an auth collection', () => {
     reset()
     failFor.add('5-ann@example.com')
     const a = ctxFor('https://users5.test', 'members')
-    const res = await loadAuthors(a.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '5-ann@example.com' }], { invite: true })
+    const res = await loadAuthors(a.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '5-ann@example.com' }], { ...OPT_IN, invite: true })
     expect(res.invitations).toEqual({ sent: 0, failed: 1 })
     expect(a.report.summary['authors']).toEqual({ created: 1 })
     expect(a.report.warnings.map((w) => w.code)).toEqual(['AUTHOR_ACCOUNT_CREATED', 'AUTHOR_INVITE_FAILED'])
@@ -218,7 +235,7 @@ describe('loadAuthors into an auth collection', () => {
 
     failFor.add('6-ann@example.com')
     const b = ctxFor('https://users6.test', 'members')
-    await loadAuthors(b.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '6-ann@example.com' }], { invite: true, includePii: true })
+    await loadAuthors(b.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '6-ann@example.com' }], { ...OPT_IN, invite: true, includePii: true })
     expect(b.report.warnings.find((w) => w.code === 'AUTHOR_INVITE_FAILED')!.detail).toContain('6-ann@example.com')
   })
 
@@ -226,7 +243,7 @@ describe('loadAuthors into an auth collection', () => {
   it('reports every account it creates by wpId and slug, never the email unless includePii', async () => {
     reset()
     const a = ctxFor('https://users8.test', 'members')
-    await loadAuthors(a.ctx, [...people('8-'), { wpId: 3, slug: 'seo-admin', displayName: 'admin', email: 'x@spam.example' }])
+    await loadAuthors(a.ctx, [...people('8-'), { wpId: 3, slug: 'seo-admin', displayName: 'admin', email: 'x@spam.example' }], OPT_IN)
     const created = a.report.warnings.filter((w) => w.code === 'AUTHOR_ACCOUNT_CREATED')
     expect(created.map((w) => w.doc)).toEqual(['author:1', 'author:2', 'author:3'])
     expect(created[2]!.detail).toBe('User 3 (slug "seo-admin") got a login account in members. Check it is a real person before go-live')
@@ -234,12 +251,12 @@ describe('loadAuthors into an auth collection', () => {
 
     // A re-run updates and reports nothing new.
     const b = ctxFor('https://users8.test', 'members')
-    await loadAuthors(b.ctx, people('8-'))
+    await loadAuthors(b.ctx, people('8-'), OPT_IN)
     expect(b.report.warnings).toEqual([])
 
     // A dry run lists what it would create; --include-pii adds the address.
     const d = ctxFor('https://users9.test', 'members', true)
-    await loadAuthors(d.ctx, people('9-'), { includePii: true })
+    await loadAuthors(d.ctx, people('9-'), { ...OPT_IN, includePii: true })
     expect(d.report.warnings.map((w) => w.code)).toEqual(['AUTHOR_ACCOUNT_CREATED', 'AUTHOR_ACCOUNT_CREATED'])
     expect(d.report.warnings[1]!.detail).toBe('User 2 (slug "bob") (9-bob@example.com) would get a login account in members. Check it is a real person before go-live')
   })
@@ -254,7 +271,7 @@ describe('loadAuthors into an auth collection', () => {
   it('a collection with verify gets no verification email, and fields it lacks are dropped', async () => {
     reset()
     const a = ctxFor('https://users7.test', 'verified')
-    await loadAuthors(a.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '7-ann@example.com' }])
+    await loadAuthors(a.ctx, [{ wpId: 1, slug: 'ann', displayName: 'Ann', email: '7-ann@example.com' }], OPT_IN)
     expect(a.report.errors).toEqual([])
     expect(a.report.summary['authors']).toEqual({ created: 1 })
     expect(sent).toEqual([])

@@ -330,7 +330,19 @@ post types it will skip.
 
 The blog preset maps WordPress users into a plain `authors` collection. To make them Payload
 accounts instead, point `collections.author.to` at an auth collection (one with `auth`) that has
-the `wpMeta` field. wp2payload notices the `auth` setting and then:
+the `wpMeta` field, and turn on account creation in `wp2payload.config.ts`:
+
+```ts
+collections: { /* ... */ author: { to: 'users' } },
+authors: { createAccounts: true },
+```
+
+Accounts are never created by default. Without `authors.createAccounts`, mapping authors into an
+auth collection stops `migrate` (and `doctor`) with exit code 2 before anything is written, and
+`--invite-users` is a usage error (exit 2). It is a config key rather than a flag so it holds for
+every run of the project (resumes, `--since` syncs, the first-run preview) and `doctor` can check
+it. A run with it on records it in the report: `optIns` in `report.json`, an `opt-in` line in the
+summary and "Safety defaults loosened" in `security-report.html`. With it, wp2payload:
 
 - creates each user with their WordPress email and a random 32-byte password that is never shown,
   logged or saved anywhere (WordPress password hashes cannot be reused);
@@ -342,7 +354,8 @@ the `wpMeta` field. wp2payload notices the `auth` setting and then:
   (`AUTHOR_EMAIL_IN_USE`), and never migrates roles. Check your collection's access rules and any
   default role first: every invited user can log in.
 
-Every new account can log in, so `migrate` prints this as a warning before it starts. Only users
+Every new account can log in, so `migrate` prints this as a warning before it starts, even with
+the opt-in. Only users
 who wrote migrated content get one, but on a hacked site the attacker's own user usually wrote the
 spam posts, so it qualifies too. Each account a run creates (or a dry run would create) is listed
 as an `AUTHOR_ACCOUNT_CREATED` warning with its WordPress ID and slug, counted on the `accounts`

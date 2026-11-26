@@ -145,6 +145,12 @@ export const configSchema = z.strictObject({
       externalLinkRel: z.string().default('nofollow noopener'),
     })
     .default({ embedHosts: EMBED_HOSTS, externalLinkRel: 'nofollow noopener' }),
+  // Doc 2.6, 12.2 principle 6: WordPress users become Payload login accounts only when asked.
+  authors: z
+    .strictObject({
+      createAccounts: z.boolean({ error: 'expected true or false' }).default(false),
+    })
+    .default({ createAccounts: false }),
   transformers: z.array(transformer).default([]),
 })
 

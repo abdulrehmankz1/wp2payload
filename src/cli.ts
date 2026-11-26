@@ -80,7 +80,7 @@ program
   .addOption(new Option('--fail-on-security <level>', 'exit with code 4 if findings at or above this level exist').choices(['low', 'medium', 'high']))
   .option('--allow-svg', 'accept SVG uploads after a strict check')
   .option('--allow-embed-host <host>', 'add a trusted iframe host (repeatable)', list)
-  .option('--invite-users', 'email a password-set link to each new user when authors map into an auth collection')
+  .option('--invite-users', 'email a password-set link to each new login account (needs authors.createAccounts)')
   .option('--include-pii', 'allow author emails in the report (left out by default)')
   .option('--yes', 'skip the first-run confirmation (for CI)')
   .option('--verbose', 'per-item logging')

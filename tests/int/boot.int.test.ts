@@ -5,8 +5,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { runDoctor } from '../../src/commands/doctor.js'
 import { resolveConfig } from '../../src/config/index.js'
-import { bootPayload, findPayloadConfig, type BootedPayload } from '../../src/payload/boot.js'
+import { bootPayload, findPayloadConfig, loadPayloadConfig, type BootedPayload } from '../../src/payload/boot.js'
 import { PayloadBootError } from '../../src/payload/errors.js'
 import { preflight } from '../../src/payload/preflight.js'
 
@@ -105,6 +106,38 @@ describe('bootPayload', () => {
       ['ok', 'Collection media (WordPress media)'],
       ['fail', 'Collection categories (WordPress category) does not exist in Payload'],
     ])
+  })
+
+  it('loadPayloadConfig reads the collections, auth included, without starting Payload (doctor, SEC-01)', async () => {
+    const { config, configPath } = await loadPayloadConfig({ cwd: projectDir })
+    expect(configPath).toBe(path.join(projectDir, 'src', 'payload.config.ts'))
+    const slugs = config.collections.map((c) => c.slug)
+    expect(slugs).toEqual(expect.arrayContaining(['posts', 'media']))
+    expect(config.collections.find((c) => c.slug === 'posts')?.auth).toBeFalsy()
+    // Payload adds its default users collection, with auth, when the config has none.
+    expect(config.collections.filter((c) => c.auth).map((c) => c.slug)).toEqual(['users'])
+  })
+
+  it('doctor refuses authors mapped into the auth collection without authors.createAccounts (exit 2)', async () => {
+    const configPath = path.join(repoTmp, `wp2p-accounts-${process.pid}.config.ts`)
+    const write = (extra: string) =>
+      writeFile(configPath, `export default { source: { type: 'rest', url: 'https://example.test' }, collections: { author: { to: 'users' } }${extra} }\n`)
+    const createExtractor = () => ({ probe: async () => ({ siteUrl: 'https://example.test', counts: {} }), rankMathHeadless: async () => 'on' as const })
+    try {
+      await write('')
+      const lines: string[] = []
+      const code = await runDoctor({ cwd: projectDir, configPath, env: { NO_COLOR: '1' }, log: (l) => lines.push(l), createExtractor })
+      expect(code, lines.join('\n')).toBe(2)
+      expect(lines.join('\n')).toMatch(/✖ Authors map into users, an auth collection/)
+      await write(', authors: { createAccounts: true }')
+      lines.length = 0
+      // The fixture's package.json does not list payload (it resolves from the repo), so doctor still exits 1, not 2.
+      expect(await runDoctor({ cwd: projectDir, configPath, env: { NO_COLOR: '1' }, log: (l) => lines.push(l), createExtractor })).toBe(1)
+      expect(lines.join('\n')).toMatch(/! Authors become login accounts in users \(authors\.createAccounts\)/)
+      expect(lines.join('\n')).not.toMatch(/✖ Authors map into/)
+    } finally {
+      await rm(configPath, { force: true })
+    }
   })
 
   it('fails with PAYLOAD_NOT_INSTALLED outside a project with payload', async () => {
