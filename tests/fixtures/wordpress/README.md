@@ -6,7 +6,7 @@ Local, throwaway WordPress + MySQL for the REST extractor and end-to-end tests. 
 
 ```
 docker compose up -d
-node scripts/fixture-seed.mjs     # pnpm fixture:seed once PM adds the script
+pnpm fixture:seed
 docker compose down -v            # full reset (drops DB and wp volume)
 ```
 

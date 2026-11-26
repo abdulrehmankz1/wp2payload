@@ -27,10 +27,14 @@ describe('defaults', () => {
     expect(c.collections.post?.to).toBe('posts')
     expect(c.transformers).toEqual([])
   })
-  it('accepts wxr and defaults sql tablePrefix', () => {
+  it('accepts wxr, leaves sql tablePrefix out (detected) and validates a configured one', () => {
     expect(resolveConfig({ source: { type: 'wxr', file: 'a.xml' } }).source.type).toBe('wxr')
     const sql = resolveConfig({ source: { type: 'sql', file: 'a.sql', uploadsDir: './u' } }).source
-    expect(sql).toMatchObject({ type: 'sql', tablePrefix: 'wp_' })
+    expect(sql).toEqual({ type: 'sql', file: 'a.sql', uploadsDir: './u' })
+    expect(resolveConfig({ source: { type: 'sql', file: 'a.sql', uploadsDir: './u', tablePrefix: 'Blog_7' } }).source).toMatchObject({ tablePrefix: 'Blog_7' })
+    for (const bad of ['', 'wp-', "wp_'; DROP TABLE x; --", 'a'.repeat(65)]) {
+      expect(() => resolveConfig({ source: { type: 'archive', file: 'a.zip', tablePrefix: bad } })).toThrow(/source\.tablePrefix: expected a table prefix of 1 to 64 letters, digits or underscores/)
+    }
   })
   it('defineConfig is the identity', () => {
     const input = { source: { type: 'wxr' as const, file: 'a.xml' } }

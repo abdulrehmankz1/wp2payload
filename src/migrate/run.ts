@@ -2,7 +2,8 @@ import { rm } from 'node:fs/promises'
 import type { CollectionSlug, Payload } from 'payload'
 import type { ResolvedConfig } from '../config/index.js'
 import type { Extractor, IRDocument, IRMedia, IRTerm } from '../ir/types.js'
-import { loadAuthors } from '../loaders/authors.js'
+import { authOf, loadAuthors } from '../loaders/authors.js'
+import { CREATE_ACCOUNTS } from '../payload/accounts.js'
 import { loadDocuments } from '../loaders/documents.js'
 import { loadMedia } from '../loaders/media.js'
 import type { DownloadCache } from './download-cache.js'
@@ -184,6 +185,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
         shouldStop,
         invite: o.inviteUsers === true,
         includePii: o.includePii === true,
+        createAccounts: o.config.authors.createAccounts,
       })
       invitations = result.invitations
       return undefined
@@ -271,6 +273,10 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     ...(redirects ? { redirects } : {}),
   })
   if (invitations) json.invitations = { ...invitations }
+  // Doc 12.2 principle 6: a loosened rule appears in the report, whether or not this run created an account.
+  if (kinds.author !== undefined && o.config.authors.createAccounts && authOf(o.payload, kinds.author)) {
+    json.optIns = [{ option: CREATE_ACCOUNTS, detail: `WordPress users with migrated content become login accounts in ${kinds.author}` }]
+  }
   // Everything the CLI prints and report.json holds comes from this object (doc 4.2 --include-pii).
   return o.includePii ? json : withoutEmails(json)
 }

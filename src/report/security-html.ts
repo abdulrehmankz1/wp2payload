@@ -47,6 +47,7 @@ export function renderSecurityReportHtml(input: ReportJson, opts: { version?: st
   const warnings = arr(r['warnings'])
   const errors = arr(r['errors'])
   const accounts = warnings.map(obj).filter((w): w is Record<string, unknown> => w?.['code'] === ACCOUNT_CREATED)
+  const optIns = arr(r['optIns']).map(obj).filter((o): o is Record<string, unknown> => o !== undefined)
 
   const kind = stopped ? 'Migration stopped early' : dryRun ? 'Dry run, nothing was written' : 'Migration'
   const started = text(r['startedAt'], 40)
@@ -92,6 +93,10 @@ ${table(['Phase', ...ACTIONS], phases(obj(r['summary']) ?? {}).map(([phase, coun
     ...ACTIONS.map((a) => `<td class="num">${count(counts[a])}</td>`),
   ]), 'No items processed.')}
 ${redirects(obj(r['redirects']))}
+${optIns.length ? `
+<h2>Safety defaults loosened</h2>
+<p>These options were turned on for this run; without them wp2payload would have refused.</p>
+${table(['Option', 'Effect'], optIns.map((o) => [`<td><code>${esc(text(o['option'], 100))}</code></td>`, `<td>${esc(text(o['detail'], MAX_TEXT))}</td>`]), '')}` : ''}
 ${accounts.length ? `
 <h2>Accounts created</h2>
 <p>${dryRun ? 'These WordPress users would get' : 'These WordPress users got'} an account that can log in to the new site. On a hacked site the attacker's own user usually wrote the spam, so it gets one too. Check each is a real person before go-live and delete any that is not.</p>

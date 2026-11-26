@@ -115,7 +115,7 @@ folder above that has `wp2payload.config.ts`, without going past your project's 
 | `--fail-on-security <level>` | Exit with code 4 when findings at `low`, `medium` or `high` exist |
 | `--allow-svg` | Accept SVG uploads after a strict check |
 | `--allow-embed-host <host>` | Trust another iframe host (YouTube and Vimeo are trusted by default) |
-| `--invite-users` | When authors map into an auth collection, email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
+| `--invite-users` | When authors map into an auth collection (with `authors.createAccounts: true`), email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
 | `--include-pii` | Allow author emails in the report; by default the report and the output hold no email addresses |
 | `--yes` | Skip the first-run confirmation (for CI) |
 | `--verbose` | List every warning and skipped phase |
@@ -184,7 +184,7 @@ no database server is needed:
 ```ts
 // A SQL dump (.sql or .sql.gz: mysqldump, phpMyAdmin, hosting backups) and wp-content/uploads
 source: { type: 'sql', file: './backup.sql.gz', uploadsDir: './uploads' },
-// tablePrefix: 'wp_' is the default; doctor names the prefix the dump uses if it differs.
+// The table prefix (wp_, or a custom one) is detected; set tablePrefix: 'abc_' only to override it.
 
 // Or an All-in-One WP Migration backup, read in place without unpacking
 source: { type: 'wpress', file: './site.wpress' },
@@ -193,9 +193,24 @@ source: { type: 'wpress', file: './site.wpress' },
 source: { type: 'sql', file: './backup_2026-01-01-1200_Site_abc123-db.gz', uploads: ['./backup_2026-01-01-1200_Site_abc123-uploads.zip', './backup_2026-01-01-1200_Site_abc123-uploads2.zip'] },
 
 // Or one archive with the dump and wp-content/uploads inside: a Duplicator *_archive.zip,
-// or your own .zip, .tar.gz or .tgz (tablePrefix: 'wp_' is the default here too)
+// or your own .zip, .tar.gz or .tgz (the table prefix is detected here too)
 source: { type: 'archive', file: './site_archive.zip' },
 ```
+
+WordPress tables need not start with `wp_`. Without `tablePrefix` in the config, wp2payload
+works the prefix out, and `doctor` prints it with where it came from:
+
+1. From the backup's `wp-config.php` (zip and tar backups, Duplicator's copy of it included):
+   only a plain `$table_prefix = '...';` is taken, and only if the value is 1 to 64 letters,
+   digits or underscores and the dump has those tables. The file is read as text and never run;
+   any other value is ignored, and `doctor` says so.
+2. Otherwise from the dump: the prefix that has `posts`, `postmeta` and `options` tables. This
+   happens during the one pass that reads the dump anyway, so a large dump is not read twice.
+
+If the dump holds more than one WordPress site (a multisite, or two installs in one database)
+and no `wp-config.php` names one of them, wp2payload stops, lists the prefixes it found and
+asks you to pick one with `tablePrefix` (`wp2payload scan <dump> --table-prefix abc_` for a
+scan). An explicit `tablePrefix` always wins.
 
 The dump is read as text and never run against a database, so triggers, procedures and the
 rest of a hacked dump have no effect, and only the columns wp2payload needs are kept: password
@@ -315,7 +330,22 @@ post types it will skip.
 
 The blog preset maps WordPress users into a plain `authors` collection. To make them Payload
 accounts instead, point `collections.author.to` at an auth collection (one with `auth`) that has
-the `wpMeta` field. wp2payload notices the `auth` setting and then:
+the `wpMeta` field, and turn on account creation in `wp2payload.config.ts`:
+
+```ts
+collections: { /* ... */ author: { to: 'users' } },
+authors: { createAccounts: true },
+```
+
+Accounts are never created by default. Without `authors.createAccounts`, mapping authors into an
+auth collection stops `migrate` (and `doctor`) with exit code 2 before anything is written, and
+`--invite-users` is a usage error (exit 2). It is a config key rather than a flag so it holds for
+every run of the project (resumes, `--since` syncs, the first-run preview) and `doctor` can check
+it. To see which collections have `auth`, `doctor` evaluates your `payload.config.ts` whenever
+authors are mapped; it never connects to the database or runs `onInit`. Only authors may map into
+an auth collection: posts, pages, terms or media mapped into one fail the check before anything is
+written. A run with it on records it in the report: `optIns` in `report.json`, an `opt-in` line
+in the summary and "Safety defaults loosened" in `security-report.html`. With it, wp2payload:
 
 - creates each user with their WordPress email and a random 32-byte password that is never shown,
   logged or saved anywhere (WordPress password hashes cannot be reused);
@@ -327,7 +357,8 @@ the `wpMeta` field. wp2payload notices the `auth` setting and then:
   (`AUTHOR_EMAIL_IN_USE`), and never migrates roles. Check your collection's access rules and any
   default role first: every invited user can log in.
 
-Every new account can log in, so `migrate` prints this as a warning before it starts. Only users
+Every new account can log in, so `migrate` prints this as a warning before it starts, even with
+the opt-in. Only users
 who wrote migrated content get one, but on a hacked site the attacker's own user usually wrote the
 spam posts, so it qualifies too. Each account a run creates (or a dry run would create) is listed
 as an `AUTHOR_ACCOUNT_CREATED` warning with its WordPress ID and slug, counted on the `accounts`
@@ -415,6 +446,16 @@ git:
 - `quarantine/`: removed fragments and rejected files, saved as inert text for review.
 - `state.json`: a cache of WordPress to Payload IDs. Deleting it loses nothing,
   because the database is the source of truth.
+
+## Docs
+
+- [CLI reference](docs/reference/cli.md) and [config reference](docs/reference/config.md)
+- [Report codes](docs/reference/codes.md): every warning, error and security finding
+- [Writing a custom transformer](docs/guides/custom-transformers.md)
+- [Migrating from a backup](docs/guides/migrating-from-a-backup.md)
+- [Security model](docs/security.md)
+- [Architecture decisions](docs/adr/), [roadmap](docs/roadmap.md) and [changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Development
 

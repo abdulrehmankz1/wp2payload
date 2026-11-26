@@ -113,6 +113,7 @@ describe('SqlExtractor', () => {
       counts: { posts: 1, pages: 2, media: 1, categories: 2, tags: 1, users: 1 },
       seoPlugin: 'yoast',
       unmigratedTypes: [{ type: 'product', count: 1 }],
+      tablePrefix: { value: 'wp_', from: 'dump' },
     })
   })
 
@@ -157,9 +158,97 @@ describe('SqlExtractor', () => {
 
   it('names the table prefix when the configured one is wrong', async () => {
     const f = await file(DUMP.replaceAll('`wp_', '`blog7_'))
-    await expect(new SqlExtractor({ file: f }).probe()).rejects.toThrow(/prefix "blog7_": set source.tablePrefix/)
-    expect((await new SqlExtractor({ file: f, tablePrefix: 'blog7_' }).probe()).counts.posts).toBe(1)
+    await expect(new SqlExtractor({ file: f, tablePrefix: 'wp_' }).probe()).rejects.toThrow(/prefix "blog7_": set source.tablePrefix to it, or leave tablePrefix out/)
+    expect((await new SqlExtractor({ file: f, tablePrefix: 'blog7_' }).probe()).tablePrefix).toEqual({ value: 'blog7_', from: 'config' })
     await expect(new SqlExtractor({ file: await file('SELECT 1;') }).probe()).rejects.toBeInstanceOf(DumpError)
+  })
+})
+
+describe('table prefix detection', () => {
+  const as = (prefix: string, site = 'https://old.example') => DUMP.replaceAll('`wp_', `\`${prefix}`).replaceAll('https://old.example', site)
+
+  it('detects a custom prefix from the dump and reads it like wp_', async () => {
+    const ex = new SqlExtractor({ file: await file(as('abc_')) })
+    const info = await ex.probe()
+    expect(info.tablePrefix).toEqual({ value: 'abc_', from: 'dump' })
+    expect(info.counts).toMatchObject({ posts: 1, pages: 2, users: 1 })
+    expect((await collect(ex.documents())).map((d) => d.wpId)).toEqual([7, 8, 9])
+    expect(await collect(ex.authors())).toEqual([{ wpId: 3, slug: 'jane-d', displayName: 'Jane Doe' }])
+  })
+
+  it('ignores plugin tables that end like a WordPress table', async () => {
+    const plugin = "CREATE TABLE `wp_aiowps_options` (\n  `id` int\n);\nINSERT INTO `wp_aiowps_options` VALUES (1);\nCREATE TABLE `odd-name.posts` (\n  `id` int\n);\n"
+    expect((await new SqlExtractor({ file: await file(plugin + DUMP) }).probe()).tablePrefix).toEqual({ value: 'wp_', from: 'dump' })
+  })
+
+  it('refuses a dump with two WordPress installs, listing both prefixes, until tablePrefix picks one', async () => {
+    const f = await file(as('wp_') + as('abc_', 'https://other.example'))
+    const error = await new SqlExtractor({ file: f }).probe().catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'DUMP_MULTIPLE_SITES' })
+    expect((error as Error).message).toMatch(/more than one WordPress site, with the table prefixes "wp_", "abc_" \(and maybe more\)\.\nSet source\.tablePrefix/)
+    expect((await new SqlExtractor({ file: f, tablePrefix: 'abc_' }).probe()).siteUrl).toBe('https://other.example')
+    expect((await new SqlExtractor({ file: f, tablePrefix: 'wp_' }).probe()).siteUrl).toBe('https://old.example')
+  })
+
+  it('refuses a multisite-like dump (wp_ and wp_2_) and stops reading at the second install', async () => {
+    const f = await file(as('wp_2_', 'https://two.example') + as('wp_3_', 'https://three.example') + as('wp_'))
+    const error = await new SqlExtractor({ file: f }).probe().catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'DUMP_MULTIPLE_SITES' })
+    expect((error as Error).message).toMatch(/"wp_2_", "wp_3_" \(and maybe more\)/)
+    expect((await new SqlExtractor({ file: f, tablePrefix: 'wp_2_' }).probe()).siteUrl).toBe('https://two.example')
+  })
+
+  it('needs posts, postmeta and options for a prefix to count as an install', async () => {
+    const postsOnly = "CREATE TABLE `x_posts` (\n  `ID` bigint\n);\n"
+    await expect(new SqlExtractor({ file: await file(postsOnly) }).probe()).rejects.toThrow(/prefix "x_" has a posts table but not both postmeta and options/)
+  })
+
+  it("uses wp-config.php's prefix when the dump has those tables, even beside another install", async () => {
+    const f = await file(as('wp_') + as('abc_', 'https://other.example'))
+    const ex = new SqlExtractor({ file: f, wpConfig: { status: 'found', prefix: 'abc_' } })
+    const info = await ex.probe()
+    expect(info.tablePrefix).toMatchObject({ value: 'abc_', from: 'wp-config.php' })
+    expect(info.siteUrl).toBe('https://other.example')
+    // An explicit tablePrefix always wins.
+    const explicit = await new SqlExtractor({ file: f, tablePrefix: 'wp_', wpConfig: { status: 'found', prefix: 'abc_' } }).probe()
+    expect(explicit.tablePrefix).toEqual({ value: 'wp_', from: 'config' })
+  })
+
+  it('names the other installs when wp-config.php picks one, in the probe and as DUMP_OTHER_SITES (SEC-P3)', async () => {
+    const f = await file(as('wp_') + as('abc_', 'https://other.example'))
+    const warnings: { code: string; detail: string }[] = []
+    const ex = new SqlExtractor({ file: f, wpConfig: { status: 'found', prefix: 'abc_' }, onWarning: (w) => warnings.push(w) })
+    expect((await ex.probe()).tablePrefix).toEqual({
+      value: 'abc_',
+      from: 'wp-config.php',
+      note: 'The dump also holds other WordPress sites, with the table prefixes "wp_"; the one wp-config.php names was read. Set source.tablePrefix to choose another.',
+    })
+    await collect(ex.documents())
+    expect(warnings.filter((w) => w.code === 'DUMP_OTHER_SITES')).toHaveLength(1)
+    // One install only: nothing to say.
+    const single = await new SqlExtractor({ file: await file(as('abc_')), wpConfig: { status: 'found', prefix: 'abc_' } }).probe()
+    expect(single.tablePrefix).toEqual({ value: 'abc_', from: 'wp-config.php' })
+  })
+
+  it('refuses a dump naming tables with tens of thousands of prefixes, quickly (SEC-P1)', async () => {
+    const hostile = Array.from({ length: 50_000 }, (_, i) => `INSERT INTO \`a${i}_terms\` VALUES (1);\nCREATE TABLE \`b${i}_options\` (\n  \`x\` int\n);\n`).join('')
+    const f = await file(hostile)
+    const t = performance.now()
+    const error = await new SqlExtractor({ file: f }).probe().catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'DUMP_TOO_MANY_PREFIXES' })
+    expect((error as Error).message).toMatch(/over 1000 different prefixes/)
+    // With the prefix configured, the same names are skipped and the real site is still read.
+    const withSite = await file(hostile + DUMP)
+    expect((await new SqlExtractor({ file: withSite, tablePrefix: 'wp_' }).probe()).siteUrl).toBe('https://old.example')
+    expect(performance.now() - t).toBeLessThan(5000)
+  })
+
+  it('falls back to the dump, with a note, when wp-config.php names absent tables or is invalid', async () => {
+    const f = await file(as('abc_'))
+    const absent = await new SqlExtractor({ file: f, wpConfig: { status: 'found', prefix: 'zz_' } }).probe()
+    expect(absent.tablePrefix).toMatchObject({ value: 'abc_', from: 'dump', note: expect.stringMatching(/no complete set of tables with its prefix "zz_"/) })
+    const invalid = await new SqlExtractor({ file: f, wpConfig: { status: 'invalid', reason: '$table_prefix is not a valid table prefix' } }).probe()
+    expect(invalid.tablePrefix).toMatchObject({ value: 'abc_', from: 'dump', note: 'wp-config.php was ignored: $table_prefix is not a valid table prefix' })
   })
 })
 

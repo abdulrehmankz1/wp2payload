@@ -1,11 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { buildConfig, getPayload, type CollectionConfig, type EmailAdapter, type Payload } from 'payload'
 import { wpMetaField } from '../../src/loaders/wpmeta.js'
+import { waitForDatabase } from '../../src/payload/ready.js'
+import { closeTestPayload, testDatabase } from './db.js'
 
-// Real Payload on a throwaway SQLite file (doc 2.11: loaders run against a real instance).
+// Real Payload on a throwaway database, SQLite or MongoDB per WP2P_TEST_DB (see db.ts; doc 2.11:
+// loaders run against a real instance).
 // Collections mirror the blog preset (doc 4.7) closely enough for loader tests.
 const collections: CollectionConfig[] = [
   {
@@ -51,7 +53,7 @@ export async function startPayload(opts: StartOptions = {}): Promise<TestPayload
   const config = buildConfig({
     secret: 'test-secret-not-real',
     telemetry: false,
-    db: sqliteAdapter({ client: { url: `file:${path.join(dir, 'test.db').replace(/\\/g, '/')}` }, push: true }),
+    db: testDatabase(dir),
     collections: [...collections, ...(opts.collections ?? [])].map((c) =>
       c.upload ? { ...c, upload: { staticDir: path.join(dir, 'media') } } : c,
     ),
@@ -60,18 +62,10 @@ export async function startPayload(opts: StartOptions = {}): Promise<TestPayload
   })
   // A fresh key per instance: getPayload caches by config otherwise.
   const payload = await getPayload({ config, key: dir })
+  await waitForDatabase(payload)
   return {
     payload,
     dir,
-    async close() {
-      await payload.db.destroy?.()
-      ;(payload.db as { client?: { close?: () => void } }).client?.close?.()
-      try {
-        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-      } catch (error) {
-        // Windows can hold the SQLite file briefly after close; the OS temp cleaner removes it.
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error
-      }
-    },
+    close: () => closeTestPayload(payload, dir),
   }
 }

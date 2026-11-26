@@ -7,4 +7,6 @@ allowBuilds:
 overrides:
   dompurify: '>=3.4.17'
   happy-dom: '>=21.0.4'
+  # Under @payloadcms/db-mongodb (MongoDB integration tests); Payload 3.94 itself requires 8.24.7.
+  mongoose: '^8.24.7'
   next: '>=16.4.5'

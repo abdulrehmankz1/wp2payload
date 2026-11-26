@@ -119,6 +119,92 @@ describe('UpdraftPlus backups (a dump plus split uploads archives)', () => {
   })
 })
 
+describe('table prefix from the backup (wp-config.php, else the dump)', () => {
+  const abc = WP_DUMP.replaceAll('`wp_', '`abc_')
+  const config = (php: string) => `<?php\ndefine('AUTH_KEY', 'k/*ey');\n$table_prefix = ${php};\nrequire_once ABSPATH . 'wp-settings.php';\n`
+  const prefixOf = async (archive: string, tablePrefix?: string) => {
+    const s = await openSource(resolveConfig({ source: { type: 'archive', file: archive, ...(tablePrefix ? { tablePrefix } : {}) } }), dir, { media: false })
+    try {
+      return (await s.extractor.probe()).tablePrefix
+    } finally {
+      await s.close?.()
+    }
+  }
+
+  it("reads $table_prefix from a zip's wp-config.php as text, and an explicit tablePrefix wins", async () => {
+    const both = WP_DUMP + abc.replaceAll('https://old.example', 'https://other.example')
+    const f = await zip([{ name: 'site/wp-config.php', data: config("'abc_'") }, { name: 'site/database.sql', data: both }])
+    // The other install in the dump is named (SEC-P3); doctor shows it as a warning.
+    expect(await prefixOf(f)).toMatchObject({ value: 'abc_', from: 'wp-config.php', note: expect.stringMatching(/other WordPress sites, with the table prefixes "wp_"/) })
+    expect(await prefixOf(f, 'wp_')).toEqual({ value: 'wp_', from: 'config' })
+    const cwd = await mkdtemp(path.join(dir, 'doctor-others-'))
+    await writeFile(path.join(cwd, 'wp2payload.config.ts'), `export default { source: { type: 'archive', file: ${JSON.stringify(f)} } }`)
+    const out: string[] = []
+    await runDoctor({ cwd, log: (l) => out.push(l), env: { NO_COLOR: '1' } })
+    expect(out.join('\n')).toMatch(/! Table prefix abc_ \(from the backup's wp-config\.php\)\n\s+The dump also holds other WordPress sites/)
+    // scan (like migrate) reports it as a warning.
+    expect(await runScanCommand({ cwd, target: f, media: false, log: () => {}, env: {} })).toBe(0)
+    const scan = JSON.parse(await readFile(path.join(cwd, '.wp2payload', 'scan.json'), 'utf8')) as ScanReport
+    expect(scan.warnings.map((w) => w.code)).toContain('DUMP_OTHER_SITES')
+  })
+
+  it("reads Duplicator's wp-config copy and a tar.gz's wp-config.php, without unpacking either", async () => {
+    const dup = await zip([{ name: 'dup-installer/dup-wp-config-arc__6f1e2d.txt', data: config('"abc_"') }, { name: 'dup-installer/dup-database__6f1e2d.sql', data: abc }])
+    expect(await prefixOf(dup)).toEqual({ value: 'abc_', from: 'wp-config.php' })
+    const t = await tgz([{ name: 'public_html/wp-config.php', data: config("'abc_'") }, { name: 'db.sql', data: abc }])
+    const a = await openArchive(t, opts())
+    try {
+      expect(a.wpConfig).toContain("$table_prefix = 'abc_'")
+      expect(await readdir(a.tempRoot!, { recursive: true })).toEqual(['db.sql'])
+    } finally {
+      await a.close()
+    }
+    expect(await prefixOf(t)).toEqual({ value: 'abc_', from: 'wp-config.php' })
+  })
+
+  it('rejects a hostile $table_prefix and detects the prefix from the dump instead', async () => {
+    for (const hostile of ["''; system('x'); //'", "'wp_'.system('id')", '"wp_${x}"', "'abc_; DROP TABLE x'"]) {
+      const f = await zip([{ name: 'wp-config.php', data: config(hostile) }, { name: 'database.sql', data: abc }])
+      const p = await prefixOf(f)
+      expect(p, hostile).toMatchObject({ value: 'abc_', from: 'dump', note: expect.stringMatching(/^wp-config\.php was ignored: /) })
+      expect(p?.note, hostile).not.toMatch(/system|DROP|\$\{/)
+    }
+  })
+
+  it('ignores wp-config.php under wp-content, and two that tie', async () => {
+    const plugin = await zip([{ name: 'wp-content/plugins/x/wp-config.php', data: config("'zz_'") }, { name: 'database.sql', data: abc }])
+    expect(await prefixOf(plugin)).toEqual({ value: 'abc_', from: 'dump' })
+    const tie = await zip([{ name: 'a/wp-config.php', data: config("'zz_'") }, { name: 'b/wp-config.php', data: config("'abc_'") }, { name: 'database.sql', data: abc }])
+    const a = await openArchive(tie, opts())
+    expect(a.wpConfig).toBeUndefined()
+    await a.close()
+  })
+
+  it('scan <dump> detects the prefix, refuses two installs, and takes --table-prefix', async () => {
+    const cwd = await mkdtemp(path.join(dir, 'scan-prefix-'))
+    const one = await file('one.sql', abc)
+    expect(await runScanCommand({ cwd, target: one, media: false, log: () => {}, env: {} })).toBe(0)
+    const two = await file('two.sql', WP_DUMP + abc.replaceAll('https://old.example', 'https://other.example'))
+    const lines: string[] = []
+    expect(await runScanCommand({ cwd, target: two, media: false, log: (l) => lines.push(l), env: { NO_COLOR: '1' } })).toBe(1)
+    expect(lines.join('\n')).toMatch(/more than one WordPress site, with the table prefixes "wp_", "abc_"[\s\S]*--table-prefix/)
+    lines.length = 0
+    expect(await runScanCommand({ cwd, target: two, tablePrefix: 'abc_', media: false, log: (l) => lines.push(l), env: { NO_COLOR: '1' } })).toBe(0)
+    expect(lines.join('\n')).toMatch(/Backup of https:\/\/other\.example/)
+    expect(await runScanCommand({ cwd, target: two, tablePrefix: "abc_'--", media: false, log: () => {}, env: {} })).toBe(2)
+    expect(await runScanCommand({ cwd, target: 'https://example.com', tablePrefix: 'abc_', log: () => {}, env: {} })).toBe(2)
+  })
+
+  it('doctor prints the prefix and where it came from', async () => {
+    const cwd = await mkdtemp(path.join(dir, 'doctor-prefix-'))
+    const f = await zip([{ name: 'wp-config.php', data: config("'abc_'") }, { name: 'database.sql', data: abc }])
+    await writeFile(path.join(cwd, 'wp2payload.config.ts'), `export default { source: { type: 'archive', file: ${JSON.stringify(f)} } }`)
+    const out: string[] = []
+    await runDoctor({ cwd, log: (l) => out.push(l), env: { NO_COLOR: '1' } })
+    expect(out.join('\n')).toMatch(/Table prefix abc_ \(from the backup's wp-config\.php\)/)
+  })
+})
+
 describe('tar backups (extracted to a private temp folder)', () => {
   it('extracts only the dump and the uploads, and removes them on close', async () => {
     const f = await tgz([
@@ -464,7 +550,7 @@ describe('entry path rules', () => {
 
 describe('config, scan and doctor over archives', () => {
   it('accepts the archive source and exactly one of uploadsDir and uploads', () => {
-    expect(resolveConfig({ source: { type: 'archive', file: 'a.zip' } }).source).toEqual({ type: 'archive', file: 'a.zip', tablePrefix: 'wp_' })
+    expect(resolveConfig({ source: { type: 'archive', file: 'a.zip' } }).source).toEqual({ type: 'archive', file: 'a.zip' })
     expect(resolveConfig({ source: { type: 'sql', file: 'a-db.gz', uploads: 'u.zip' } }).source).toMatchObject({ uploads: 'u.zip' })
     expect(() => resolveConfig({ source: { type: 'sql', file: 'a.sql', uploadsDir: 'u', uploads: ['u.zip'] } })).toThrow(/source\.uploadsDir: expected either/)
     expect(() => resolveConfig({ source: { type: 'sql', file: 'a.sql', uploads: [] } })).toThrow(/at least one uploads archive/)

@@ -2,6 +2,7 @@ import path from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import type { CollectionSlug, Payload } from 'payload'
 import { authOf } from '../loaders/authors.js'
+import { accountsCheck, inviteWithoutOptIn, type AccountsCheck } from '../payload/accounts.js'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import type { Env } from '../config/types.js'
 import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
@@ -75,6 +76,11 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     log(formatLine('fail', error.message))
     return error.exitCode
   }
+  const usage = inviteWithoutOptIn(config, opts.inviteUsers === true)
+  if (usage) {
+    log(formatLine(usage.status, usage.title, usage.detail))
+    return 2
+  }
 
   // Doc 2.8: an unreachable source fails before anything is written.
   let source: OpenedSource
@@ -124,10 +130,11 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     const failed = checks.filter((c) => c.status === 'fail')
     for (const c of opts.verbose ? checks : failed) log(formatLine(c.status, c.title, c.detail))
     if (failed.length) return 1
-    const invite = inviteCheck(booted.payload, config, opts.inviteUsers === true)
-    if (invite) {
-      log(formatLine(invite.status, invite.title, invite.detail))
-      if (invite.status === 'fail') return 1
+    // SEC-01: login accounts only with authors.createAccounts; without it nothing is written (exit 2).
+    const accounts = inviteCheck(booted.payload, config, opts.inviteUsers === true)
+    if (accounts) {
+      log(formatLine(accounts.status, accounts.title, accounts.detail))
+      if (accounts.status === 'fail') return accounts.exitCode ?? 1
     }
 
     const site = siteKey(siteUrl)
@@ -208,42 +215,12 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
 }
 
 /**
- * Doc 2.6: what `--invite-users` will do with this Payload. Without an email adapter Payload writes
- * emails to its log, recipient included, so inviting then fails before anything is written.
+ * Doc 2.6, SEC-01: what the authors phase will do with login accounts in this Payload. Fails (exit 2)
+ * when authors map into an auth collection without authors.createAccounts. Without an email adapter
+ * Payload writes emails to its log, recipient included, so --invite-users then fails (exit 1).
  */
-export function inviteCheck(
-  payload: Payload,
-  config: ResolvedConfig,
-  inviteUsers: boolean,
-): { status: 'ok' | 'warn' | 'fail'; title: string; detail?: string } | undefined {
-  const to = config.collections['author']?.to as CollectionSlug | undefined
-  const auth = to !== undefined && authOf(payload, to) !== undefined
-  if (!auth) {
-    return inviteUsers
-      ? { status: 'warn', title: '--invite-users has no effect', detail: `Authors are not mapped into an auth collection${to ? ` (${to} has no auth)` : ''}, so no accounts are created.` }
-      : undefined
-  }
-  // A warning, not ok: on a hacked site the attacker's user wrote the spam posts and gets an account too.
-  const review = 'These accounts can log in. Every one created is listed in the report as AUTHOR_ACCOUNT_CREATED; check each is a real person before go-live.'
-  if (!inviteUsers) {
-    return {
-      status: 'warn',
-      title: `Authors become login accounts in ${to}`,
-      detail: `${review} Each new account gets a random password. Add --invite-users to email a password-set link, or users can use "Forgot password".`,
-    }
-  }
-  if (!payload.config.email) {
-    return {
-      status: 'fail',
-      title: '--invite-users needs an email adapter in your Payload config',
-      detail: 'Without one Payload only logs emails. Add email: nodemailerAdapter(...) or resendAdapter(...) to payload.config.ts, or run without --invite-users.',
-    }
-  }
-  return {
-    status: 'warn',
-    title: `Authors become login accounts in ${to}, each emailed a password-set link`,
-    detail: `${review} Only accounts created by this run are emailed; re-runs send nothing.`,
-  }
+export function inviteCheck(payload: Payload, config: ResolvedConfig, inviteUsers: boolean): AccountsCheck | undefined {
+  return accountsCheck(config, (slug) => authOf(payload, slug as CollectionSlug) !== undefined, { inviteUsers, email: Boolean(payload.config.email) })
 }
 
 async function ask(question: string): Promise<boolean> {

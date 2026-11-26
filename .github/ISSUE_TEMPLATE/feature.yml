@@ -1,0 +1,42 @@
+name: Feature request
+description: Something wp2payload should migrate, check or report.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features are added for real use cases (see docs/roadmap.md, "How features get added").
+        Page-builder layouts and two-way sync are out of scope for now.
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: The site or migration you are working on, and what you cannot do today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The command, flag, config key or report entry you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample data
+      description: |
+        A small sample of the WordPress data involved (block HTML, postmeta keys, a REST response),
+        with anything private removed.
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact
+      description: |
+        Does this read new kinds of input, fetch from new places, or loosen a rule? Every new source
+        must pass the hacked-site suite.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you have tried
+      description: For example a custom transformer, or a change to your collections.

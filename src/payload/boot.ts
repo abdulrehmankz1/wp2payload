@@ -7,6 +7,7 @@ import type { Payload, SanitizedConfig } from 'payload'
 import type { Env } from '../config/types.js'
 import { SUPPORTED_PAYLOAD_MAJOR } from '../doctor/checks.js'
 import { PayloadBootError } from './errors.js'
+import { waitForDatabase } from './ready.js'
 
 // Boots the USER's Payload, never wp2payload's own dev copy (spec 05 Decisions). Everything
 // Payload-side is resolved from the project folder so the process holds exactly one Payload
@@ -230,7 +231,30 @@ function loadProjectEnv(loadEnv: (dir?: string) => void, cwd: string): void {
 
 let namespaceCount = 0
 
-export async function bootPayload(opts: BootOptions): Promise<BootedPayload> {
+/**
+ * The user's Payload config only, without starting Payload: no database connection, no init hooks.
+ * Runs the config file as bootPayload does (it is the user's own code). doctor reads collection
+ * settings from it, such as which collections have `auth`.
+ */
+export async function loadPayloadConfig(opts: BootOptions): Promise<{ config: SanitizedConfig; configPath: string }> {
+  const { project, configPath } = await locate(opts)
+  let unregister: (() => Promise<void>) | undefined
+  try {
+    const tsx = (await import(payloadDependencyUrl(project, 'tsx', './esm/api'))) as TsxApi
+    const tsconfig = findUp(path.dirname(configPath), ['tsconfig.json'])
+    const api = tsx.register({ namespace: `wp2payload-${process.pid}-${namespaceCount++}`, tsconfig: tsconfig ?? false })
+    unregister = () => api.unregister()
+    const configUrl = pathToFileURL(configPath).href
+    return { config: await unwrapConfig(await api.import(configUrl, configUrl)), configPath }
+  } catch (error) {
+    throw bootFailed(configPath, error)
+  } finally {
+    await unregister?.().catch(() => undefined)
+  }
+}
+
+/** The project's Payload, its env loaded, and the config file, as Payload's bin finds them. */
+async function locate(opts: BootOptions): Promise<{ project: ProjectPayload; configPath: string }> {
   const cwd = path.resolve(opts.cwd)
   const project = resolveProjectPayload(cwd)
 
@@ -257,6 +281,11 @@ export async function bootPayload(opts: BootOptions): Promise<BootedPayload> {
 
   await registerLexicalLoader(project)
   process.env.DISABLE_PAYLOAD_HMR = 'true'
+  return { project, configPath }
+}
+
+export async function bootPayload(opts: BootOptions): Promise<BootedPayload> {
+  const { project, configPath } = await locate(opts)
 
   let payload: Payload
   let unregister: (() => Promise<void>) | undefined
@@ -275,6 +304,7 @@ export async function bootPayload(opts: BootOptions): Promise<BootedPayload> {
       getPayload(options: { config: SanitizedConfig; key?: string }): Promise<Payload>
     }
     payload = await payloadModule.getPayload({ config, key: configPath })
+    await waitForDatabase(payload)
   } catch (error) {
     await unregister?.().catch(() => undefined)
     throw bootFailed(configPath, error)
