@@ -20,6 +20,8 @@ export interface SecureContext {
   externalLinkRel: string
   transformers: Transformer[]
   report: ReportSink
+  /** Quarantined fragments approved in `wp2payload review` (sha256). */
+  approvedFragments?: ReadonlySet<string>
   /** Project folder; quarantine goes under <root>/.wp2payload/quarantine. */
   root: string
   dryRun: boolean
@@ -68,7 +70,10 @@ export async function transformDocument(doc: IRDocument, ctx: TransformContext):
 export async function secureDocument(doc: IRDocument, ctx: SecureContext): Promise<SecuredDocument> {
   const ref = `${doc.type}:${doc.wpId}`
   const warn = (i: { code: string; detail: string }) => ctx.report.warning({ ...i, doc: ref })
-  const opts = { doc: ref, siteOrigin: ctx.siteOrigin, embedHosts: ctx.embedHosts, externalLinkRel: ctx.externalLinkRel, spam: false }
+  const opts = {
+    doc: ref, siteOrigin: ctx.siteOrigin, embedHosts: ctx.embedHosts, externalLinkRel: ctx.externalLinkRel, spam: false,
+    ...(ctx.approvedFragments ? { approvedFragments: ctx.approvedFragments } : {}),
+  }
   const quarantine = quarantiner(doc, ctx)
 
   const scanned = scanDocument(doc.html, opts)

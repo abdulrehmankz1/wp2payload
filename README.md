@@ -36,7 +36,8 @@ WordPress export file or a backup. Safe to re-run, and it keeps a hacked site's 
 - A Payload CMS 3 project (any database adapter)
 - A WordPress site reachable over its REST API, an export file from **Tools → Export**
   (see [From an export file](#from-an-export-file-wxr)), or a backup: a SQL dump with the uploads
-  folder, or an All-in-One WP Migration `.wpress` file (see [From a backup](#from-a-backup)).
+  folder, an All-in-One WP Migration `.wpress` file, or a zip or tar backup such as UpdraftPlus
+  or Duplicator (see [From a backup](#from-a-backup)).
   For the REST API, an
   [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/)
   is optional but recommended: without it only published content is read, and
@@ -92,7 +93,8 @@ WP_APP_PASSWORD=xxxx xxxx xxxx    # optional: revoke it after the migration
 | `doctor` | Checks Node.js, your Payload installation and the WordPress site or export file. Writes nothing. |
 | `migrate` | Runs the migration. Safe to re-run: existing items are updated, not duplicated. |
 | `scan [target]` | Security and content health report of a site, without migrating. Needs no Payload project (see [Scanning a site](#scanning-a-site)). |
-| `report` | Prints the last migration report again (`--json` for the raw file). |
+| `review` | Goes through quarantined items to approve or reject them; approvals apply on the next run (see [Reviewing quarantine](#reviewing-quarantine)). |
+| `report` | Prints the last migration report again (`--json` for the raw file, `--html [path]` to export the HTML security report). |
 | `reset` | Deletes local state and the cache. Never touches your database. |
 
 Run commands from your project folder or any folder inside it: wp2payload uses the nearest
@@ -108,10 +110,13 @@ folder above that has `wp2payload.config.ts`, without going past your project's 
 | `--limit <n>` | Write only the first n documents (all are still read, so links resolve) |
 | `--concurrency <n>` | Parallel media downloads (default 4) |
 | `--fresh` | Ignore the local ID cache; still upserts, so no duplicates |
+| `--since <date>` | Write only documents changed since this date or time (e.g. `2026-11-05`, midnight UTC), for a launch-day sync after a content freeze |
 | `--strict` | Exit with code 3 when there are warnings or errors |
 | `--fail-on-security <level>` | Exit with code 4 when findings at `low`, `medium` or `high` exist |
 | `--allow-svg` | Accept SVG uploads after a strict check |
 | `--allow-embed-host <host>` | Trust another iframe host (YouTube and Vimeo are trusted by default) |
+| `--invite-users` | When authors map into an auth collection, email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
+| `--include-pii` | Allow author emails in the report; by default the report and the output hold no email addresses |
 | `--yes` | Skip the first-run confirmation (for CI) |
 | `--verbose` | List every warning and skipped phase |
 
@@ -183,13 +188,35 @@ source: { type: 'sql', file: './backup.sql.gz', uploadsDir: './uploads' },
 
 // Or an All-in-One WP Migration backup, read in place without unpacking
 source: { type: 'wpress', file: './site.wpress' },
+
+// Or an UpdraftPlus backup: the database plus the uploads archive(s), split ones included
+source: { type: 'sql', file: './backup_2026-01-01-1200_Site_abc123-db.gz', uploads: ['./backup_2026-01-01-1200_Site_abc123-uploads.zip', './backup_2026-01-01-1200_Site_abc123-uploads2.zip'] },
+
+// Or one archive with the dump and wp-content/uploads inside: a Duplicator *_archive.zip,
+// or your own .zip, .tar.gz or .tgz (tablePrefix: 'wp_' is the default here too)
+source: { type: 'archive', file: './site_archive.zip' },
 ```
 
 The dump is read as text and never run against a database, so triggers, procedures and the
 rest of a hacked dump have no effect, and only the columns wp2payload needs are kept: password
 hashes and emails are never read. Old URLs are rebuilt from the permalink settings in the dump.
 Media paths from the dump must stay inside the uploads folder or archive. Encrypted `.wpress`
-backups cannot be read.
+and zip backups cannot be read.
+
+In an archive, the dump is Duplicator's `dup-installer/dup-database__*.sql`, else `database.sql`
+at the root, else the one `.sql` or `.sql.gz` file outside `wp-content` (if there are several,
+extract the right one and use a `sql` source). The uploads are the shallowest
+`wp-content/uploads/` folder, or `uploads/` at the root as UpdraftPlus packs it. Zip archives
+are read in place. A `.tar.gz` cannot be read at random, so the dump and the uploads, and
+nothing else, are unpacked once into a private temp folder (`TMPDIR`), which is removed when the
+command ends, also on an error or Ctrl+C.
+
+Every entry is checked before anything is read, and a hostile archive is refused as a whole
+with a `SEC_ARCHIVE_*` code ([codes](docs/reference/codes.md#backup-archives)): names that
+leave the archive (`..`, absolute paths, drive letters, backslash tricks), symbolic and hard
+links, device files, Windows device names (`con`, `nul .jpg`), and zip entries whose data
+overlaps. Zip bombs are capped at 1,000,000 entries, 64 GB unpacked, and a compression ratio
+of 100:1 for anything over 1 MB; the database dump is capped at 8 GB.
 
 ### Using your existing collections
 
@@ -270,7 +297,7 @@ deleted is pointed at the migrated document.
 | Reusable blocks (synced patterns) | Inlined into each document that uses them, nested ones included. With credentials they are read from `/wp/v2/blocks`; without, WordPress serves rendered content that already contains them |
 | Media | Your upload collection, deduplicated by content hash, with alt text and caption |
 | Categories (with hierarchy) and tags | Your mapped collections |
-| Authors | Name and slug only, and only users who wrote migrated content |
+| Authors | Name and slug only, and only users who wrote migrated content. Into an auth collection (opt-in, see [Authors as login accounts](#authors-as-login-accounts)) also the email |
 | Yoast SEO and Rank Math | The SEO group (`meta` by default): title, description, image, and noindex and off-site canonicals when your group has them. Rank Math needs **Headless CMS Support** turned on (General Settings → Others); `doctor` tells you when it is off |
 | Old URLs | Redirects |
 
@@ -284,6 +311,62 @@ links but not their layout; shortcodes stay as text; other post types (such as W
 products) are not migrated yet. Each of these is listed in the report, and `doctor` names the
 post types it will skip.
 
+### Authors as login accounts
+
+The blog preset maps WordPress users into a plain `authors` collection. To make them Payload
+accounts instead, point `collections.author.to` at an auth collection (one with `auth`) that has
+the `wpMeta` field. wp2payload notices the `auth` setting and then:
+
+- creates each user with their WordPress email and a random 32-byte password that is never shown,
+  logged or saved anywhere (WordPress password hashes cannot be reused);
+- with `--invite-users`, sends Payload's forgot-password email to each account it created, so the
+  user sets their own password. Your Payload config needs an email adapter; without one the run
+  stops before writing, because Payload would only print the emails to its log. A dry run and a
+  re-run send nothing. Without `--invite-users`, users can use "Forgot password" on the login page;
+- never links to or changes an account it did not create, even with the same email
+  (`AUTHOR_EMAIL_IN_USE`), and never migrates roles. Check your collection's access rules and any
+  default role first: every invited user can log in.
+
+Every new account can log in, so `migrate` prints this as a warning before it starts. Only users
+who wrote migrated content get one, but on a hacked site the attacker's own user usually wrote the
+spam posts, so it qualifies too. Each account a run creates (or a dry run would create) is listed
+as an `AUTHOR_ACCOUNT_CREATED` warning with its WordPress ID and slug, counted on the `accounts`
+line of the summary (`--verbose` lists them) and listed under "Accounts created" in
+`security-report.html`. Check each one is a real person, and delete any that is not, before
+go-live. These warnings count for `--strict`.
+
+Emails come only from the REST source with an Application Password that can list users; export
+files and SQL dumps are read without them, so their users are reported as `AUTHOR_NO_EMAIL`.
+Reports leave out email addresses unless you pass `--include-pii`.
+
+## Reviewing quarantine
+
+Removed content and rejected files are never imported on their own. `wp2payload review` goes
+through them one by one in the terminal (or `--list`, then `--approve <id>` / `--reject <id>`) and
+saves each decision in `.wp2payload/review.json`. Only two kinds of item can be approved, because
+they are often false positives and are harmless once sanitized:
+
+- an iframe from a host not in `security.embedHosts` (an embedded map, say): its host is trusted on
+  the next run, so its iframes become embed blocks;
+- a hidden block with links (an accordion or a tab panel): that exact block is kept on the next run,
+  still sanitized, and visible in Payload.
+
+Scripts, event handlers, dangerous URLs and rejected uploads can only be rejected. Run
+`migrate` again after approving; the approvals are listed as allowed findings in the report.
+
+## Launch-day sync
+
+When the old site keeps changing until launch, migrate once ahead of time, freeze content, then
+copy only what changed during the freeze:
+
+```bash
+npx wp2payload migrate --since 2026-11-05
+```
+
+Media, terms and authors are checked as on every run (already migrated items cost a lookup,
+not a download); only documents modified before the date are left as they are. Content deleted on
+the old site during the freeze is not deleted in Payload.
+
 ## Scanning a site
 
 `scan` reads a site the way a migration would and reports what it found, without Payload and
@@ -294,6 +377,9 @@ npx wp2payload scan https://oldsite.com          # WP_USER and WP_APP_PASSWORD f
 npx wp2payload scan ./export.xml
 npx wp2payload scan ./backup.sql.gz --uploads ./uploads
 npx wp2payload scan ./site.wpress
+npx wp2payload scan ./site_archive.zip           # Duplicator, or any .zip/.tar.gz/.tgz with the dump and wp-content/uploads
+npx wp2payload scan ./backup_..._abc123-db.gz    # UpdraftPlus: finds backup_..._abc123-uploads*.zip next to it
+npx wp2payload scan ./db.sql.gz --uploads ./uploads-1.zip --uploads ./uploads-2.zip
 npx wp2payload scan                              # the source in wp2payload.config.ts
 ```
 
@@ -313,6 +399,19 @@ git:
 
 - `report.json`: counts, warnings, errors, redirects and security findings. Every code
   is described in [`docs/reference/codes.md`](docs/reference/codes.md).
+- `security-report.html`: the same run as a page you can hand to a client: what was found
+  on the old site and what was kept out of the new one. It has findings by severity, each
+  finding with its code, document or file, action and quarantine path, and a short run
+  summary. Every `migrate` writes it, including dry runs and runs that stopped. The page is
+  self-contained and inert: no scripts, no links, nothing loaded from elsewhere, and its
+  Content-Security-Policy allows only its own stylesheet. Every value from the site is
+  escaped and long values are shortened. Email addresses are never shown.
+  `wp2payload report --html` writes it again from the last `report.json`, and
+  `wp2payload report --html client/report.html` writes it somewhere else. The path is
+  relative to where you run the command and must end in `.html` or `.htm`, so a typo cannot
+  overwrite `report.json` or your source code. Accounts created in an auth collection have their
+  own section (see [Authors as login accounts](#authors-as-login-accounts)).
+- `scan.json` and `scan.html`: the last `scan` (see [Scanning a site](#scanning-a-site)).
 - `quarantine/`: removed fragments and rejected files, saved as inert text for review.
 - `state.json`: a cache of WordPress to Payload IDs. Deleting it loses nothing,
   because the database is the source of truth.

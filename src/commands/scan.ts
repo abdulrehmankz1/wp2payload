@@ -1,11 +1,13 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, resolveConfig, type ResolvedConfig } from '../config/index.js'
 import type { Env } from '../config/types.js'
 import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
 import { ensureWorkDir } from '../migrate/workdir.js'
+import { loadApprovals } from '../review/store.js'
 import { SEVERITY_RANK } from '../report/build.js'
+import { withoutEmails } from '../report/pii.js'
 import { clean, formatDuration, issueLines, securityLines } from '../report/summary.js'
 import type { Severity } from '../report/types.js'
 import { renderScanHtml } from '../scan/html.js'
@@ -18,8 +20,8 @@ export interface ScanCommandOptions {
   configPath?: string
   /** A site URL, export file or backup to scan instead of the configured source. */
   target?: string
-  /** SQL dumps given as a target: the uploads folder next to it. */
-  uploads?: string
+  /** SQL dumps given as a target: the uploads folder, or the uploads archives (UpdraftPlus). */
+  uploads?: string | string[]
   media?: boolean
   limit?: number
   concurrency?: number
@@ -32,27 +34,62 @@ export interface ScanCommandOptions {
   env?: Env
   log?: (line: string) => void
   // Injected in tests.
-  open?: (config: ResolvedConfig, cwd: string) => Promise<OpenedSource>
+  open?: (config: ResolvedConfig, cwd: string, opts?: { media?: boolean }) => Promise<OpenedSource>
 }
 
 export const SCAN_JSON = 'scan.json'
 export const SCAN_HTML = 'scan.html'
 
+const ARCHIVE = /\.(zip|tar\.gz|tgz|tar)$/i
+
+/** UpdraftPlus names its archives after one stem: <stem>-db.gz, <stem>-uploads.zip, <stem>-uploads2.zip... */
+function updraftUploads(dump: string, cwd: string): string[] {
+  const stem = /^(.+)-db\.gz$/i.exec(path.basename(dump))?.[1]
+  if (!stem) return []
+  let names: string[]
+  try {
+    names = readdirSync(path.resolve(cwd, path.dirname(dump)))
+  } catch {
+    return []
+  }
+  const part = (name: string) => Number(/-uploads(\d*)\.zip$/i.exec(name)?.[1] || 1)
+  return names
+    .filter((n) => n.startsWith(stem) && /^-uploads\d*\.zip$/i.test(n.slice(stem.length)))
+    .sort((a, b) => part(a) - part(b))
+    .map((n) => path.join(path.dirname(dump), n))
+}
+
 /** The source a target names: a URL is a live site, otherwise the file extension decides. */
-export function sourceFor(target: string, cwd: string, uploads: string | undefined, env: Env): { source: Record<string, unknown>; media?: false } {
+export function sourceFor(target: string, cwd: string, uploads: string | string[] | undefined, env: Env): { source: Record<string, unknown>; media?: false } {
   if (/^https?:\/\//i.test(target)) {
     const auth = env['WP_USER'] && env['WP_APP_PASSWORD'] ? { auth: { user: env['WP_USER'], appPassword: env['WP_APP_PASSWORD'] } } : {}
     return { source: { type: 'rest', url: target, ...auth } }
   }
   const lower = target.toLowerCase()
+  const given = uploads === undefined ? [] : Array.isArray(uploads) ? uploads : [uploads]
   if (lower.endsWith('.wpress')) return { source: { type: 'wpress', file: target } }
   if (lower.endsWith('.xml')) return { source: { type: 'wxr', file: target } }
-  if (lower.endsWith('.sql') || lower.endsWith('.sql.gz')) {
-    const dir = uploads ?? path.join(path.dirname(target), 'uploads')
+  if (ARCHIVE.test(lower)) {
+    if (given.length) throw new ConfigError('--uploads is for a SQL dump; a .zip or .tar.gz backup holds its own uploads.')
+    return { source: { type: 'archive', file: target } }
+  }
+  // .sql, .sql.gz, and UpdraftPlus's *-db.gz.
+  if (lower.endsWith('.sql') || lower.endsWith('.gz')) {
+    if (given.length && given.every((f) => ARCHIVE.test(f))) return { source: { type: 'sql', file: target, uploads: given } }
+    if (given.length > 1 || given.some((f) => ARCHIVE.test(f))) {
+      throw new ConfigError('Pass --uploads once with the uploads folder, or once per uploads archive (.zip, .tar.gz).')
+    }
+    if (!given.length) {
+      const updraft = updraftUploads(target, cwd)
+      if (updraft.length) return { source: { type: 'sql', file: target, uploads: updraft } }
+    }
+    const dir = given[0] ?? path.join(path.dirname(target), 'uploads')
     // Without an uploads folder the content is still scanned; the media is not.
     return { source: { type: 'sql', file: target, uploadsDir: dir }, ...(existsSync(path.resolve(cwd, dir)) ? {} : { media: false as const }) }
   }
-  throw new ConfigError(`Cannot tell what ${JSON.stringify(target)} is. Pass a site URL (https://...), an export file (.xml), a SQL dump (.sql, .sql.gz) or a .wpress backup.`)
+  throw new ConfigError(
+    `Cannot tell what ${JSON.stringify(target)} is. Pass a site URL (https://...), an export file (.xml), a SQL dump (.sql, .sql.gz, -db.gz), a .wpress backup or a .zip/.tar.gz backup.`,
+  )
 }
 
 /** `wp2payload scan` (doc F18). Returns the process exit code: 0, 1 source failed, 2 usage, 4 findings at --fail-on-security. */
@@ -87,8 +124,9 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
   }
 
   let report: ScanReport
+  let source: OpenedSource | undefined
   try {
-    const source = await (opts.open ?? openSource)(config, cwd)
+    source = await (opts.open ?? openSource)(config, cwd, { media })
     const info = await source.extractor.probe()
     const siteUrl = source.configuredUrl ?? info.siteUrl
     log(formatLine('ok', `${source.label} ${clean(info.siteUrl)}`))
@@ -103,6 +141,7 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
       allowSvg: opts.allowSvg === true,
       allowEmbedHosts: opts.allowEmbedHosts ?? [],
+      approvals: await loadApprovals(cwd),
       onPhase: (phase, status) => {
         if (status === 'start') log(`${phase}...`)
       },
@@ -112,8 +151,12 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
     const [title = error.message, ...rest] = error.message.split('\n')
     log(rest.length ? formatLine('fail', title, rest.join('\n')) : formatLine('fail', title))
     return 1
+  } finally {
+    await source?.close?.()
   }
 
+  // A scan never reads author emails, but warnings can quote content that holds addresses.
+  report = withoutEmails(report)
   const dir = await ensureWorkDir(cwd)
   await writeFile(path.join(dir, SCAN_JSON), JSON.stringify(report, null, 2) + '\n', 'utf8')
   await writeFile(path.join(dir, SCAN_HTML), renderScanHtml(report, { version: opts.version ?? 'dev' }), 'utf8')

@@ -192,6 +192,9 @@ importers:
       sharp:
         specifier: ~0.35.5
         version: 0.35.5(@types/node@22.20.5)
+      yauzl:
+        specifier: ^3.4.0
+        version: 3.4.0
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -211,6 +214,9 @@ importers:
       '@types/sanitize-html':
         specifier: ^2.16.2
         version: 2.16.2
+      '@types/yauzl':
+        specifier: ^3.4.0
+        version: 3.4.0
       fast-check:
         specifier: ^4.10.2
         version: 4.10.2
@@ -1747,6 +1753,9 @@ packages:
   '@types/ws@8.18.2':
     resolution: {integrity: sha512-67MQl+fpWKVTT1NYdnmo3U4sc/xPo/zQBncVnI74qmQa0z/b+1g6iYqNmGCPbxO+zz2aklb08a0oHfegiVd0/w==}
 
+  '@types/yauzl@3.4.0':
+    resolution: {integrity: sha512-NRPn5w6h8dhcnmx3YIRQcqMywY/+nND/uOkJessedcrowO3C0AssHp3tMJpxKAwOhFOo0OV1y9VtsC5hbKKBAw==}
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
     engines: {node: '>=16.20.0'}
@@ -2831,6 +2840,9 @@ packages:
     peerDependencies:
       graphql: ^16.8.1
 
+  pend@1.2.0:
+    resolution: {integrity: sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -3399,6 +3411,10 @@ packages:
   yaml@1.10.3:
     resolution: {integrity: sha512-vIYeF1u3CjlhAFekPPAk2h/Kv4T3mAkMox5OymRiJQB0spDP10LHvt+K7G9Ny6NuuMAb25/6n1qyUjAcGNf/AA==}
     engines: {node: '>= 6'}
+
+  yauzl@3.4.0:
+    resolution: {integrity: sha512-jIH9yLR9wqr0wOS0TpBvo/g/2UgZH5qePVbjgRliiF0BYvOZyaBknKsF+x9Iht0O6sqgnB93rCICdOZFecJuDw==}
+    engines: {node: '>=12'}
 
   yjs@13.6.33:
     resolution: {integrity: sha512-q/UYvr1gOk4XII+Cu1CW2dINjYqJJFifTzogEaIARznrvX7uOlHsdTEXcnOBMuIsrCGEEKdNxi74kyMLZlKVfw==}
@@ -4753,6 +4769,10 @@ snapshots:
     dependencies:
       '@types/node': 22.20.5
 
+  '@types/yauzl@3.4.0':
+    dependencies:
+      '@types/node': 22.20.5
+
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -5845,6 +5865,8 @@ snapshots:
       - typescript
       - utf-8-validate
 
+  pend@1.2.0: {}
+
   picocolors@1.1.1: {}
 
   picomatch@2.3.2: {}
@@ -6420,6 +6442,10 @@ snapshots:
       cssfilter: 0.0.10
 
   yaml@1.10.3: {}
+
+  yauzl@3.4.0:
+    dependencies:
+      pend: 1.2.0
 
   yjs@13.6.33:
     dependencies:

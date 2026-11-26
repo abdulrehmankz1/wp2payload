@@ -10,10 +10,12 @@ import { loadRedirects } from '../loaders/redirects.js'
 import { loadTerms } from '../loaders/terms.js'
 import type { DocumentTarget, LoaderContext, RedirectSource } from '../loaders/types.js'
 import { buildReport } from '../report/build.js'
+import { withoutEmails } from '../report/pii.js'
 import { MemoryReport, type ReportJson } from '../report/types.js'
 import { resolve, StateStore } from '../state/store.js'
 import { errorRateExceeded, flagLinkHeavy } from './guards.js'
 import { DocumentSpill, spillPath } from './spill.js'
+import type { Approvals } from '../review/store.js'
 import { ensureWorkDir } from './workdir.js'
 
 export const PHASES = ['media', 'terms', 'authors', 'documents', 'redirects'] as const
@@ -36,6 +38,10 @@ export interface PipelineOptions {
    * allowlisted: https, and never a private address.
    */
   trustSiteHost?: boolean
+  /** Only documents modified at or after this time are written (content freeze, doc 13.1). */
+  since?: Date
+  /** Decisions from `wp2payload review`: hosts trusted for iframes and fragments kept. */
+  approvals?: Approvals
   /** Backup sources: reads local media (from the uploads folder or the backup archive). */
   readLocalMedia?: (localPath: string, maxBytes: number) => Promise<Buffer>
   dryRun: boolean
@@ -46,6 +52,10 @@ export interface PipelineOptions {
   fresh?: boolean
   allowSvg?: boolean
   allowEmbedHosts?: readonly string[]
+  /** `--invite-users`: password-set emails for users created in an auth collection (real runs only). */
+  inviteUsers?: boolean
+  /** `--include-pii`: author emails may appear in the report; otherwise every address is removed. */
+  includePii?: boolean
   /** Shared by the first-run preview and the real run, so media is downloaded once. */
   downloadCache?: DownloadCache
   /** Set by Ctrl+C; checked between items. */
@@ -116,6 +126,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   // Documents planned in a dry run (they have no Payload ID yet).
   const planned = new Set<string>()
   let redirects: ReportJson['redirects']
+  let invitations: ReportJson['invitations']
   try {
     // Every document is extracted, even with --only or --limit: the URL resolver needs every
     // permalink, or a targeted run would turn correct internal links back into old-site URLs.
@@ -168,7 +179,13 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     })
     await run('authors', kinds.author !== undefined, async () => {
       // Doc 12.9: only users with migrated content.
-      await loadAuthors(ctx, o.extractor.authors(), { include: authorsWithContent, shouldStop })
+      const result = await loadAuthors(ctx, o.extractor.authors(), {
+        include: authorsWithContent,
+        shouldStop,
+        invite: o.inviteUsers === true,
+        includePii: o.includePii === true,
+      })
+      invitations = result.invitations
       return undefined
     })
 
@@ -176,14 +193,16 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
       const entries = spill!.entries
       let processed = 0
       const sec = o.config.security
-      await loadDocuments(ctx, () => selected(spill!.read(), types, o.limit), {
+      const unchanged = () => report.count('documents', 'skipped')
+      await loadDocuments(ctx, () => selected(spill!.read(), types, o.limit, o.since, unchanged), {
         targets,
         transform: {
           siteOrigin: siteUrl,
-          embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? [])],
+          embedHosts: [...sec.embedHosts, ...(o.allowEmbedHosts ?? []), ...(o.approvals?.hosts ?? [])],
           externalLinkRel: sec.externalLinkRel,
           transformers: o.config.transformers,
           root: o.root,
+          ...(o.approvals?.fragments.size ? { approvedFragments: o.approvals.fragments } : {}),
         },
         media,
         documents: entries,
@@ -243,7 +262,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   }
 
   flagLinkHeavy(report, links)
-  return buildReport(report, {
+  const json = buildReport(report, {
     site: o.site,
     dryRun: o.dryRun,
     startedAt,
@@ -251,6 +270,9 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     ...(stopped ? { stopped } : {}),
     ...(redirects ? { redirects } : {}),
   })
+  if (invitations) json.invitations = { ...invitations }
+  // Everything the CLI prints and report.json holds comes from this object (doc 4.2 --include-pii).
+  return o.includePii ? json : withoutEmails(json)
 }
 
 const DRY_RUN_ID = 'dry-run'
@@ -290,11 +312,21 @@ export class OnlyError extends Error {
   }
 }
 
-/** Document types chosen with --only, then the first `limit` of them. */
-async function* selected(docs: AsyncIterable<IRDocument>, types: Set<string> | undefined, limit?: number): AsyncIterable<IRDocument> {
+/** Document types chosen with --only, changed since --since, then the first `limit` of them. */
+async function* selected(
+  docs: AsyncIterable<IRDocument>,
+  types: Set<string> | undefined,
+  limit?: number,
+  since?: Date,
+  unchanged?: () => void,
+): AsyncIterable<IRDocument> {
   let n = 0
   for await (const d of docs) {
     if (types && !types.has(d.type)) continue
+    if (since && Date.parse(d.modifiedAt) < since.getTime()) {
+      unchanged?.()
+      continue
+    }
     if (limit !== undefined && n >= limit) return
     n++
     yield d

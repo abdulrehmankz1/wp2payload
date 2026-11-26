@@ -4,7 +4,8 @@ import path from 'node:path'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import { checkNodeVersion, checkPayloadInstalled, type CheckResult } from '../doctor/checks.js'
 import { RestError, RestExtractor } from '../extractors/rest/index.js'
-import { openSource } from '../extractors/source.js'
+import { openUploadsArchives } from '../extractors/archive/index.js'
+import { openSource, type OpenedSource } from '../extractors/source.js'
 import { DumpError, SqlExtractor } from '../extractors/sql/index.js'
 import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
 import type { SourceInfo } from '../ir/types.js'
@@ -66,20 +67,51 @@ async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' 
     if (!(error instanceof DumpError)) throw error
     results.push({ status: 'fail', title: error.message })
   }
-  const uploads = path.resolve(cwd, source.uploadsDir)
+  if (source.uploads !== undefined) {
+    // UpdraftPlus uploads archives: indexed and checked against the archive rules, not unpacked.
+    const files = Array.isArray(source.uploads) ? source.uploads : [source.uploads]
+    try {
+      const opened = await openUploadsArchives(files.map((f) => path.resolve(cwd, f)), { media: false, maxMediaBytes: 0 })
+      await opened.close()
+      results.push({ status: 'ok', title: `Uploads archive${files.length === 1 ? '' : 's'}: ${opened.uploads} files` })
+    } catch (error) {
+      if (!(error instanceof DumpError)) throw error
+      results.push(failed(error))
+    }
+    return results
+  }
+  const dir = source.uploadsDir as string
+  const uploads = path.resolve(cwd, dir)
   if (!existsSync(uploads)) results.push({ status: 'fail', title: `Uploads folder not found: ${uploads}`, detail: 'Point source.uploadsDir at wp-content/uploads from the backup.' })
-  else results.push({ status: 'ok', title: `Uploads folder ${source.uploadsDir}` })
+  else results.push({ status: 'ok', title: `Uploads folder ${dir}` })
   return results
 }
 
-async function checkWpress(config: ResolvedConfig, opts: DoctorOptions): Promise<CheckResult[]> {
+/** A source error as a check: its first line is the title, the rest (next step, code) the detail. */
+function failed(error: Error): CheckResult {
+  const [title = error.message, ...rest] = error.message.split('\n')
+  return rest.length ? { status: 'fail', title, detail: rest.join('\n') } : { status: 'fail', title }
+}
+
+/** .wpress, zip and tar backups: opened as migrate opens them, without unpacking media. */
+async function checkBackup(config: ResolvedConfig, opts: DoctorOptions): Promise<CheckResult[]> {
+  let source: OpenedSource | undefined
   try {
-    const info = await (await openSource(config, opts.cwd ?? process.cwd())).extractor.probe()
+    source = await openSource(config, opts.cwd ?? process.cwd(), { media: false })
+    const info = await source.extractor.probe()
     const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
-    return [{ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info)]
+    const results: CheckResult[] = [{ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info)]
+    if (source.uploadFiles === 0) {
+      results.push({ status: 'warn', title: 'The backup has no uploads folder', detail: 'No media will be migrated. Duplicator and hand-made archives keep it in wp-content/uploads.' })
+    } else if (source.uploadFiles !== undefined) {
+      results.push({ status: 'ok', title: `Uploads in the backup: ${source.uploadFiles} files` })
+    }
+    return results
   } catch (error) {
     if (!(error instanceof DumpError)) throw error
-    return [{ status: 'fail', title: error.message }]
+    return [failed(error)]
+  } finally {
+    await source?.close?.()
   }
 }
 
@@ -87,7 +119,7 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
   const { source } = config
   if (source.type === 'wxr') return checkWxr(path.resolve(opts.cwd ?? process.cwd(), source.file), opts)
   if (source.type === 'sql') return checkSql(source, opts)
-  if (source.type === 'wpress') return checkWpress(config, opts)
+  if (source.type === 'wpress' || source.type === 'archive') return checkBackup(config, opts)
   try {
     const extractor = (opts.createExtractor ?? defaultExtractor)(source)
     const info = await extractor.probe()

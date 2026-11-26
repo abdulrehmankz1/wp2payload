@@ -14,6 +14,8 @@ export interface SummaryOptions {
 const PHASE_ORDER = ['media', 'terms', 'authors', 'documents']
 const ACTION_ORDER: CountAction[] = ['created', 'updated', 'reused', 'skipped', 'rejected', 'errors']
 const TOP_CODES = 5
+/** Warning code for each login account the authors phase created (or would create, in a dry run). */
+export const ACCOUNT_CREATED = 'AUTHOR_ACCOUNT_CREATED'
 
 // Singular and plural noun phrase per code; the action ("removed", "quarantined"...) follows.
 const DESCRIPTIONS: Record<string, [string, string]> = {
@@ -109,7 +111,7 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
     return i === -1 ? PHASE_ORDER.length : i
   }
   const phases = Object.keys(json.summary).sort((a, b) => order(a) - order(b) || a.localeCompare(b))
-  const width = Math.max(11, ...phases.map((p) => clean(p).length + 2))
+  const width = Math.max(json.invitations ? 13 : 11, ...phases.map((p) => clean(p).length + 2))
   for (const phase of phases) {
     const counts = json.summary[phase] ?? {}
     const parts = ACTION_ORDER.filter((a) => (counts[a] ?? 0) > 0).map((a) => `${counts[a]} ${a}`)
@@ -120,6 +122,16 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
   if (json.redirects && !json.summary['redirects']) {
     const conflicts = json.redirects.conflicts ? `, ${plural(json.redirects.conflicts, 'conflict')}` : ''
     lines.push(` ${'redirects'.padEnd(width)}${json.redirects.count}${conflicts}`)
+  }
+  if (json.invitations) {
+    const { sent, failed } = json.invitations
+    lines.push(` ${'invitations'.padEnd(width)}${json.dryRun ? `${sent} would be sent` : `${sent} sent${failed ? `, ${failed} failed` : ''}`}`)
+  }
+  // Login accounts made from WordPress users; on a hacked site one may be the attacker's.
+  const accounts = json.warnings.filter((w) => w.code === ACCOUNT_CREATED).length
+  if (accounts > 0) {
+    const what = json.dryRun ? `${plural(accounts, 'login account')} would be created` : `${plural(accounts, 'login account')} created`
+    lines.push(` ${'accounts'.padEnd(width)}${what}; check each is a real person before go-live (${ACCOUNT_CREATED})`)
   }
   if (json.redirects?.file && !json.dryRun) {
     // Generated from source data and kept in the ignored folder on purpose: a person reviews it first.

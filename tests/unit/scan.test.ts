@@ -95,8 +95,8 @@ describe('wp2payload scan', () => {
     const lines: string[] = []
     expect(await runScanCommand({ cwd, log: (l) => lines.push(l), env: {} })).toBe(2)
     expect(lines.join('\n')).toMatch(/wp2payload scan https:\/\/example\.com/)
-    expect(await runScanCommand({ cwd, target: 'site.zip', log: (l) => lines.push(l), env: {} })).toBe(2)
-    expect(lines.join('\n')).toMatch(/Cannot tell what "site\.zip" is/)
+    expect(await runScanCommand({ cwd, target: 'site.7z', log: (l) => lines.push(l), env: {} })).toBe(2)
+    expect(lines.join('\n')).toMatch(/Cannot tell what "site\.7z" is/)
   })
 })
 
@@ -124,7 +124,7 @@ describe('renderScanHtml', () => {
       security: { summary: { high: 1, medium: 0, low: 0 }, findings: [{ code: 'SEC_SCRIPT_TAG', severity: 'high', action: 'quarantined', doc: hostile, detail: hostile }] },
     }
     const html = renderScanHtml(report, { version: '1.0.0' })
-    expect(html).toContain(`content="default-src 'none'; style-src 'unsafe-inline'"`)
+    expect(html).toMatch(/content="default-src 'none'; style-src 'sha256-[A-Za-z0-9+/]+=*'; base-uri 'none'; form-action 'none'"/)
     expect(html).not.toMatch(/<script|<img|\u202e/i)
     expect(html).toContain('&lt;img src=x onerror=alert(2)&gt;')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')

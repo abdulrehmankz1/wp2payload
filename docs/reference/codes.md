@@ -1,6 +1,6 @@
 # Report codes
 
-Every warning, error and security finding in `.wp2payload/report.json` carries one of these codes. Codes are stable: once released, a code keeps its meaning. New codes may be added.
+Every warning, error and security finding in `.wp2payload/report.json` (and in `.wp2payload/security-report.html`, the same report as HTML) carries one of these codes. Codes are stable: once released, a code keeps its meaning. New codes may be added.
 
 ## Security findings
 
@@ -46,6 +46,20 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `SEC_FILE_TOO_LARGE` | high | rejected | Over `media.maxFileSizeMB` |
 | `SEC_PATH_TRAVERSAL` | high | rejected | Backup sources: the dump names a media file outside the uploads folder (`../`, an absolute path, or a link that points out) |
 
+### Backup archives
+
+Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of a `sql` source) are checked before anything is read from them. A hostile archive is refused as a whole: `migrate`, `scan` and `doctor` stop with the code in the message, nothing is migrated, and no report is written. Caps and the rules they enforce are in the README under [From a backup](../../README.md#from-a-backup).
+
+| Code | Severity | Action | Meaning |
+| --- | --- | --- | --- |
+| `SEC_ARCHIVE_PATH_TRAVERSAL` | high | refused | An entry name that leaves the archive folder: `..`, an absolute path, a drive letter or a colon, a NUL character, the same tricks with backslashes, or (tar, where files are unpacked) a name Windows reserves or trims in any folder of the path: `CON`, `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9` (superscript ¹²³ too), `CONIN$`, `CONOUT$`, with any extension and spaces before the dot (`con .sql`), or a name ending in a dot or space |
+| `SEC_ARCHIVE_LINK` | high | refused | A symbolic or hard link entry |
+| `SEC_ARCHIVE_SPECIAL_FILE` | high | refused | A device, FIFO, socket, sparse or other entry that is not a regular file or folder |
+| `SEC_ARCHIVE_TOO_LARGE` | high | refused | The dump and uploads of a zip, or a whole tar, unpack to more than 64 GB; or (tar) the `.sql`/`.sql.gz` files that could be the dump, kept on disk together while it is unpacked, pass the 8 GB dump cap. Only candidates that can still be picked are kept, so a backup with one dump never hits this |
+| `SEC_ARCHIVE_TOO_MANY_FILES` | high | refused | More than 1,000,000 entries |
+| `SEC_ARCHIVE_RATIO` | high | refused | A zip entry over 1 MB that unpacks to more than 100 times its packed size, or a tar.gz stream that does (zip bomb) |
+| `SEC_ARCHIVE_OVERLAP` | high | refused | Two zip entries whose data overlap, so the same packed bytes would be unpacked several times (overlap zip bomb). Zip tools never write this |
+
 ## Warnings
 
 | Code | Meaning |
@@ -84,6 +98,10 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `TERM_PARENT_CYCLE` | Categories whose parents form a loop; imported without parents |
 | `TERM_TAXONOMY_UNSUPPORTED` | A taxonomy other than categories and tags |
 | `AUTHOR_NOT_MIGRATED` | A user with no migrated content, left out on purpose (doc 12.9) |
+| `AUTHOR_NO_EMAIL` | Authors mapped into an auth collection: the user has no email in the source, so no account was created. Only the REST source with an Application Password that can list users reads emails |
+| `AUTHOR_EMAIL_IN_USE` | Authors mapped into an auth collection: an account that wp2payload did not create already has the user's email. It is never linked or changed; the user's content is written without an author |
+| `AUTHOR_ACCOUNT_CREATED` | Authors mapped into an auth collection: this run created (a dry run: would create) a login account for the user. One per account, with the WordPress ID and slug; no address unless `--include-pii`. On a hacked site the attacker's own user wrote the spam and gets an account too, so check each is a real person before go-live. Also shown on the summary's `accounts` line and under "Accounts created" in the HTML report; counts for `--strict` |
+| `AUTHOR_INVITE_FAILED` | `--invite-users`: the account was created but the password-set email could not be sent; the user can use "Forgot password" on the Payload login page. No address unless `--include-pii` |
 
 ## Errors
 
@@ -93,7 +111,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `MEDIA_NETWORK`, `MEDIA_DNS_FAILED`, `MEDIA_TIMEOUT`, `MEDIA_BAD_URL` | The media file could not be fetched |
 | `MEDIA_LOCAL_UNSUPPORTED` | A media item names a local file but the source has no uploads to read it from |
 | `MEDIA_UPLOADS_MISSING` | SQL source: `source.uploadsDir` does not exist |
-| `MEDIA_READ_FAILED` | .wpress source: a media file could not be read from the archive (it is damaged) |
+| `MEDIA_READ_FAILED` | .wpress or zip backup: a media file could not be read from the archive (it is damaged) |
 | `MEDIA_WRITE_FAILED` | Payload rejected the media upload |
 | `TERM_WRITE_FAILED`, `AUTHOR_WRITE_FAILED` | Payload rejected the write after retries |
 | `REDIRECT_CONFLICT` | Two documents claim the same old URL or the same new path, an old URL equals another document's new path (it would hide that document), or an existing redirect points to another document. The first is kept, nothing is changed, and the phase counts it as `rejected`. A redirect whose document was deleted is repointed instead |
