@@ -18,6 +18,8 @@ export interface LoadAuthorsOptions {
   invite?: boolean
   /** `--include-pii`: author emails may appear in report details. */
   includePii?: boolean
+  /** `authors.createAccounts` (SEC-01): required to write into an auth collection. */
+  createAccounts?: boolean
 }
 
 export interface LoadAuthorsResult {
@@ -41,7 +43,8 @@ export function authOf(payload: Payload, collection: CollectionSlug): { loginWit
  *
  * Non-auth collection (the blog preset): `{ name, slug }` only; email is never written.
  *
- * Auth collection (opt-in, doc 2.6), detected from the Payload collection config: a new user also gets
+ * Auth collection (opt-in with `createAccounts`, doc 2.6, SEC-01; it throws without it), detected
+ * from the Payload collection config: a new user also gets
  * the email from the source and a random 32-byte password that is never logged, reported or stored.
  * With `invite`, a real run then sends Payload's forgot-password email so the user sets their own.
  * Only users created in this run are invited, so re-runs (which update) never send again. Each created
@@ -56,6 +59,10 @@ export async function loadAuthors(
   const collection = ctx.collections.author
   if (collection === undefined) return { auth: false }
   const auth = authOf(ctx.payload, collection)
+  // migrate's preflight stops first; this keeps any other caller from creating accounts unasked.
+  if (auth && opts.createAccounts !== true) {
+    throw new Error(`Authors map into the auth collection ${collection}, but authors.createAccounts is not set; no login accounts were created`)
+  }
   const invitations = auth && opts.invite ? { sent: 0, failed: 0 } : undefined
   const pii = (email: string) => (opts.includePii ? ` (${email})` : '')
   const safe = (text: string) => (opts.includePii ? text : redactEmails(text))

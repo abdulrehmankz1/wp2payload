@@ -80,7 +80,7 @@ program
   .addOption(new Option('--fail-on-security <level>', 'exit with code 4 if findings at or above this level exist').choices(['low', 'medium', 'high']))
   .option('--allow-svg', 'accept SVG uploads after a strict check')
   .option('--allow-embed-host <host>', 'add a trusted iframe host (repeatable)', list)
-  .option('--invite-users', 'email a password-set link to each new user when authors map into an auth collection')
+  .option('--invite-users', 'email a password-set link to each new login account (needs authors.createAccounts)')
   .option('--include-pii', 'allow author emails in the report (left out by default)')
   .option('--yes', 'skip the first-run confirmation (for CI)')
   .option('--verbose', 'per-item logging')
@@ -114,6 +114,7 @@ program
   .description('Security and content health report of a site, without migrating. Needs no Payload project')
   .option('--config <path>', 'config file location (default: wp2payload.config.ts)')
   .option('--uploads <path>', 'for a SQL dump: the uploads folder (default: uploads next to the dump), or an uploads archive (repeatable)', (value: string, prev: string[] = []) => [...prev, value])
+  .option('--table-prefix <prefix>', 'for a SQL dump or backup: the WordPress table prefix (default: detected)')
   .option('--no-media', 'do not download or check media files')
   .option('--limit <n>', 'scan only the first n documents', positiveInt('--limit'))
   .option('--concurrency <n>', 'parallel media checks (default 4)', positiveInt('--concurrency'))
@@ -130,6 +131,7 @@ program
       // A file target is given relative to where the user typed it.
       ...(target ? { target: /^https?:\/\//i.test(target) ? target : path.resolve(here, target) } : {}),
       ...(opts.uploads?.length ? { uploads: opts.uploads.map((u) => path.resolve(here, u)) } : {}),
+      ...(opts.tablePrefix !== undefined ? { tablePrefix: opts.tablePrefix } : {}),
       media: opts.media !== false,
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -145,6 +147,7 @@ program
 interface ScanCliOptions {
   config?: string
   uploads?: string[]
+  tablePrefix?: string
   media?: boolean
   limit?: number
   concurrency?: number

@@ -10,6 +10,8 @@ import { DumpError, SqlExtractor } from '../extractors/sql/index.js'
 import { WxrError, WxrExtractor } from '../extractors/wxr/index.js'
 import type { SourceInfo } from '../ir/types.js'
 import { clean } from '../report/summary.js'
+import { accountsCheck, type AccountsCheck } from '../payload/accounts.js'
+import { loadPayloadConfig } from '../payload/boot.js'
 import { formatLine } from '../ui/output.js'
 
 export interface DoctorOptions {
@@ -20,7 +22,31 @@ export interface DoctorOptions {
   // Injected in tests so the source check needs no network.
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
   createWxrExtractor?: (file: string) => Pick<WxrExtractor, 'probe'>
-  createSqlExtractor?: (file: string, tablePrefix: string) => Pick<SqlExtractor, 'probe'>
+  createSqlExtractor?: (file: string, tablePrefix: string | undefined) => Pick<SqlExtractor, 'probe'>
+  /** Reads the user's Payload config without starting Payload (tests inject one). */
+  loadPayloadConfig?: (cwd: string, env: Env) => Promise<{ collections: readonly { slug: string; auth?: unknown }[] }>
+}
+
+const defaultPayloadConfig: NonNullable<DoctorOptions['loadPayloadConfig']> = async (cwd, env) =>
+  (await loadPayloadConfig(env['PAYLOAD_CONFIG_PATH'] ? { cwd, configPath: env['PAYLOAD_CONFIG_PATH'] } : { cwd })).config
+
+/**
+ * SEC-01: the same account check migrate runs before writing, from the Payload config alone (doctor
+ * never connects to the database). Exit code 2 when authors would become login accounts unasked.
+ */
+async function checkAccounts(config: ResolvedConfig, opts: DoctorOptions, payloadOk: boolean): Promise<AccountsCheck[]> {
+  if (config.collections['author'] === undefined && !config.authors.createAccounts) return []
+  let collections: readonly { slug: string; auth?: unknown }[]
+  try {
+    ;({ collections } = await (opts.loadPayloadConfig ?? defaultPayloadConfig)(opts.cwd ?? process.cwd(), opts.env ?? process.env))
+  } catch (error) {
+    // A failed Payload check already says what to fix first.
+    if (!payloadOk) return []
+    const reason = (error instanceof Error ? error.message : String(error)).split('\n')[0]
+    return [{ status: 'warn', title: 'Could not read the Payload config, so author accounts were not checked', detail: `${reason}\nmigrate runs this check before it writes anything.` }]
+  }
+  const check = accountsCheck(config, (slug) => Boolean(collections.find((c) => c.slug === slug)?.auth), { inviteUsers: false })
+  return check ? [check] : []
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
@@ -60,9 +86,10 @@ async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' 
   const results: CheckResult[] = []
   try {
     const file = path.resolve(cwd, source.file)
-    const info = await (opts.createSqlExtractor ?? ((f, prefix) => new SqlExtractor({ file: f, tablePrefix: prefix })))(file, source.tablePrefix).probe()
+    const create = opts.createSqlExtractor ?? ((f, prefix) => new SqlExtractor({ file: f, ...(prefix !== undefined ? { tablePrefix: prefix } : {}) }))
+    const info = await create(file, source.tablePrefix).probe()
     const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
-    results.push({ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info))
+    results.push({ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...prefixCheck(info), ...unmigrated(info))
   } catch (error) {
     if (!(error instanceof DumpError)) throw error
     results.push({ status: 'fail', title: error.message })
@@ -87,6 +114,16 @@ async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' 
   return results
 }
 
+/** The table prefix a dump is read with, and where it came from (a backup's prefix need not be wp_). */
+function prefixCheck(info: SourceInfo): CheckResult[] {
+  const p = info.tablePrefix
+  if (!p) return []
+  const where = p.from === 'config' ? 'source.tablePrefix' : p.from === 'wp-config.php' ? "from the backup's wp-config.php" : 'detected from the dump'
+  const title = `Table prefix ${p.value} (${where})`
+  // The note says why wp-config.php was not used: worth a look, since a hacked site's may be altered.
+  return [p.note ? { status: 'warn', title, detail: p.note } : { status: 'ok', title }]
+}
+
 /** A source error as a check: its first line is the title, the rest (next step, code) the detail. */
 function failed(error: Error): CheckResult {
   const [title = error.message, ...rest] = error.message.split('\n')
@@ -100,7 +137,12 @@ async function checkBackup(config: ResolvedConfig, opts: DoctorOptions): Promise
     source = await openSource(config, opts.cwd ?? process.cwd(), { media: false })
     const info = await source.extractor.probe()
     const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
-    const results: CheckResult[] = [{ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info)]
+    const results: CheckResult[] = [
+      { status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
+      // A .wpress backup always uses its own fixed prefix: nothing to show.
+      ...(config.source.type === 'archive' ? prefixCheck(info) : []),
+      ...unmigrated(info),
+    ]
     if (source.uploadFiles === 0) {
       results.push({ status: 'warn', title: 'The backup has no uploads folder', detail: 'No media will be migrated. Duplicator and hand-made archives keep it in wp-content/uploads.' })
     } else if (source.uploadFiles !== undefined) {
@@ -162,7 +204,8 @@ async function checkSource(config: ResolvedConfig, opts: DoctorOptions): Promise
 export async function runDoctor(opts: DoctorOptions = {}): Promise<number> {
   const cwd = opts.cwd ?? process.cwd()
   const log = opts.log ?? console.log
-  const results: CheckResult[] = [checkNodeVersion(), await checkPayloadInstalled(cwd)]
+  const payloadCheck = await checkPayloadInstalled(cwd)
+  const results: CheckResult[] = [checkNodeVersion(), payloadCheck]
   let exitCode = 0
 
   const configFile = opts.configPath ?? DEFAULT_CONFIG_FILE
@@ -176,6 +219,9 @@ export async function runDoctor(opts: DoctorOptions = {}): Promise<number> {
     try {
       const config = await loadConfig(configFile, cwd, opts.env ?? process.env)
       results.push({ status: 'ok', title: `Config ${configFile}` }, ...(await checkSource(config, opts)))
+      const accounts = await checkAccounts(config, opts, payloadCheck.status === 'ok')
+      results.push(...accounts)
+      if (accounts.some((a) => a.exitCode === 2)) exitCode = 2
     } catch (error) {
       if (!(error instanceof ConfigError)) throw error
       results.push({ status: 'fail', title: 'Invalid configuration', detail: error.message })

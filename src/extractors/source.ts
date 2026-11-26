@@ -5,6 +5,7 @@ import { readLocalMedia } from '../security/media/local.js'
 import { openArchive, openUploadsArchives } from './archive/index.js'
 import { RestError, RestExtractor } from './rest/index.js'
 import { DumpError, SqlExtractor } from './sql/index.js'
+import { wpConfigPrefix } from './sql/prefix.js'
 import { WPRESS_TABLE_PREFIX, indexWpress, readWpressMedia } from './wpress.js'
 import { WxrError, WxrExtractor } from './wxr/index.js'
 
@@ -54,7 +55,7 @@ export async function openSource(config: ResolvedConfig, cwd: string, opts: Open
         label: 'Export of',
       }
     case 'sql': {
-      const extractor = new SqlExtractor({ file: path.resolve(cwd, source.file), tablePrefix: source.tablePrefix, ...common })
+      const extractor = new SqlExtractor({ file: path.resolve(cwd, source.file), ...prefixOf(source), ...common })
       if (source.uploads !== undefined) {
         // UpdraftPlus: the dump plus one or more uploads archives.
         const files = (Array.isArray(source.uploads) ? source.uploads : [source.uploads]).map((f) => path.resolve(cwd, f))
@@ -98,7 +99,13 @@ export async function openSource(config: ResolvedConfig, cwd: string, opts: Open
         throw new DumpError('DUMP_NO_WORDPRESS', 'The backup has no SQL dump.')
       }
       return {
-        extractor: new SqlExtractor({ file: backup.database, tablePrefix: source.tablePrefix, ...common }),
+        // An explicit tablePrefix wins; else wp-config.php's, if the dump has those tables; else the dump's.
+        extractor: new SqlExtractor({
+          file: backup.database,
+          ...prefixOf(source),
+          ...(source.tablePrefix === undefined && backup.wpConfig !== undefined ? { wpConfig: wpConfigPrefix(backup.wpConfig) } : {}),
+          ...common,
+        }),
         ...(backup.readMedia ? { readLocalMedia: backup.readMedia } : {}),
         trustSiteHost: false,
         label: 'Backup of',
@@ -108,3 +115,6 @@ export async function openSource(config: ResolvedConfig, cwd: string, opts: Open
     }
   }
 }
+
+/** The configured table prefix, if any: without one the extractor detects it. */
+const prefixOf = (source: { tablePrefix?: string | undefined }) => (source.tablePrefix !== undefined ? { tablePrefix: source.tablePrefix } : {})

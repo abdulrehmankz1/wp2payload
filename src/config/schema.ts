@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { TABLE_PREFIX } from '../extractors/sql/prefix.js'
 import type { Block, Transformer } from './types.js'
 
 // Usually read from WP_URL; say so, because an unset variable arrives here as undefined.
@@ -33,7 +34,12 @@ const wxrSource = z.strictObject({
   url: httpUrl.optional(),
 })
 
-const tablePrefix = z.string().min(1, 'expected a non-empty table prefix').default('wp_')
+// WordPress allows only letters, digits and underscores here. Left out, the prefix is read from the
+// backup: wp-config.php in an archive, else the table names in the dump.
+const tablePrefix = z
+  .string({ error: 'expected a table prefix (a string), e.g. wp_' })
+  .regex(TABLE_PREFIX, 'expected a table prefix of 1 to 64 letters, digits or underscores, e.g. wp_')
+  .optional()
 
 // A SQL dump (.sql, .sql.gz, UpdraftPlus *-db.gz) with the uploads as a folder (uploadsDir) or as
 // one or more archives (uploads: UpdraftPlus *-uploads.zip, split ones too, or .tar.gz).
@@ -139,6 +145,12 @@ export const configSchema = z.strictObject({
       externalLinkRel: z.string().default('nofollow noopener'),
     })
     .default({ embedHosts: EMBED_HOSTS, externalLinkRel: 'nofollow noopener' }),
+  // Doc 2.6, 12.2 principle 6: WordPress users become Payload login accounts only when asked.
+  authors: z
+    .strictObject({
+      createAccounts: z.boolean({ error: 'expected true or false' }).default(false),
+    })
+    .default({ createAccounts: false }),
   transformers: z.array(transformer).default([]),
 })
 

@@ -133,6 +133,8 @@ export function formatSummary(json: ReportJson, opts: SummaryOptions): string[] 
     const what = json.dryRun ? `${plural(accounts, 'login account')} would be created` : `${plural(accounts, 'login account')} created`
     lines.push(` ${'accounts'.padEnd(width)}${what}; check each is a real person before go-live (${ACCOUNT_CREATED})`)
   }
+  // Doc 12.2 principle 6: options that loosened a safety default for this run.
+  for (const o of json.optIns ?? []) lines.push(` ${'opt-in'.padEnd(width)}${clean(o.option)}: ${clean(o.detail)}`)
   if (json.redirects?.file && !json.dryRun) {
     // Generated from source data and kept in the ignored folder on purpose: a person reviews it first.
     lines.push('', `Redirects for next.config: ${clean(json.redirects.file)}. Review it, then copy it into your project (see the README).`)

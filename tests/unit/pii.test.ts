@@ -2,6 +2,7 @@ import type { Payload } from 'payload'
 import { describe, expect, it } from 'vitest'
 import { inviteCheck } from '../../src/commands/migrate.js'
 import { resolveConfig } from '../../src/config/index.js'
+import { inviteWithoutOptIn } from '../../src/payload/accounts.js'
 import { redactEmails, withoutEmails } from '../../src/report/pii.js'
 import { formatSummary } from '../../src/report/summary.js'
 import type { ReportJson } from '../../src/report/types.js'
@@ -79,32 +80,67 @@ describe('invitations in the summary', () => {
   })
 })
 
-describe('inviteCheck', () => {
-  const config = (to: string) => resolveConfig({ source: { type: 'rest', url: 'https://old.test' }, collections: { author: { to } } })
+describe('inviteCheck (SEC-01 account gate)', () => {
+  const config = (to: string, createAccounts?: boolean) =>
+    resolveConfig({ source: { type: 'rest', url: 'https://old.test' }, collections: { author: { to } }, ...(createAccounts === undefined ? {} : { authors: { createAccounts } }) })
   const payload = (auth: boolean, email: boolean) =>
     ({
       collections: { authors: { config: { fields: [] } }, users: { config: { fields: [], auth: auth ? {} : undefined } } },
       config: email ? { email: () => ({}) } : {},
     }) as unknown as Payload
 
-  it('is silent for a non-auth collection, and warns that --invite-users does nothing there', () => {
+  it('defaults authors.createAccounts to off', () => {
+    expect(config('users').authors).toEqual({ createAccounts: false })
+    expect(() => config('users', 'yes' as never)).toThrow(/authors\.createAccounts: expected true or false/)
+  })
+
+  it('is silent for a non-auth collection, and warns that --invite-users or the opt-in does nothing there', () => {
     expect(inviteCheck(payload(true, true), config('authors'), false)).toBeUndefined()
-    expect(inviteCheck(payload(true, true), config('authors'), true)).toMatchObject({ status: 'warn' })
+    expect(inviteCheck(payload(true, true), config('authors', true), true)).toMatchObject({ status: 'warn', title: '--invite-users has no effect' })
+    expect(inviteCheck(payload(true, true), config('authors', true), false)).toMatchObject({ status: 'warn', title: 'authors.createAccounts has no effect' })
+  })
+
+  it('refuses an auth collection without authors.createAccounts, with exit code 2 and what to do', () => {
+    for (const invite of [false, true]) {
+      const check = inviteCheck(payload(true, true), config('users'), invite)
+      expect(check).toMatchObject({ status: 'fail', exitCode: 2 })
+      expect(check?.title).toContain('users')
+      expect(check?.detail).toMatch(/hacked site/)
+      expect(check?.detail).toContain('authors: { createAccounts: true }')
+      expect(check?.detail).toMatch(/Nothing was written/)
+    }
   })
 
   it('fails --invite-users without an email adapter, since Payload would log the addresses', () => {
-    expect(inviteCheck(payload(true, false), config('users'), true)).toMatchObject({ status: 'fail' })
+    expect(inviteCheck(payload(true, false), config('users', true), true)).toMatchObject({ status: 'fail', exitCode: 1 })
   })
 
-  it('warns that authors in an auth collection become login accounts to review before go-live', () => {
+  it('with the opt-in, warns that authors become login accounts to review before go-live', () => {
     for (const invite of [false, true]) {
-      const check = inviteCheck(payload(true, true), config('users'), invite)
+      const check = inviteCheck(payload(true, true), config('users', true), invite)
       expect(check).toMatchObject({ status: 'warn' })
-      expect(check?.title).toContain('login accounts in users')
+      expect(check?.title).toContain('login accounts in users (authors.createAccounts)')
       expect(check?.detail).toMatch(/can log in/)
       expect(check?.detail).toContain('AUTHOR_ACCOUNT_CREATED')
       expect(check?.detail).toMatch(/before go-live/)
     }
+  })
+
+  it('makes --invite-users without the opt-in a usage error, whatever the target', () => {
+    expect(inviteWithoutOptIn(config('users'), true)).toMatchObject({ status: 'fail', exitCode: 2, title: '--invite-users needs authors.createAccounts' })
+    expect(inviteWithoutOptIn(config('authors'), true)).toMatchObject({ exitCode: 2 })
+    expect(inviteWithoutOptIn(config('users'), false)).toBeUndefined()
+    expect(inviteWithoutOptIn(config('users', true), true)).toBeUndefined()
+  })
+})
+
+describe('opt-ins in the summary', () => {
+  it('lists each loosened default on its own line', () => {
+    const json = report({ optIns: [{ option: 'authors.createAccounts', detail: 'WordPress users with migrated content become login accounts in users' }] })
+    expect(formatSummary(json, { color: false, reportPath: 'r.json' })).toContain(
+      ' opt-in     authors.createAccounts: WordPress users with migrated content become login accounts in users',
+    )
+    expect(formatSummary(report({}), { color: false, reportPath: 'r.json' }).join('\n')).not.toContain('opt-in')
   })
 })
 

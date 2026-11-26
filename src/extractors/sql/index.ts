@@ -1,11 +1,12 @@
 import path from 'node:path'
-import type { Extractor, IRAuthor, IRDocument, IRMedia, IRTerm, SourceInfo } from '../../ir/types.js'
+import type { Extractor, IRAuthor, IRDocument, IRMedia, IRTerm, SourceInfo, TablePrefixInfo } from '../../ir/types.js'
 import type { Issue } from '../../report/types.js'
 import { normaliseSlug, toPlainText } from '../rest/decode.js'
 import { NOT_CONTENT_TYPES, mapStatus, pageBuilder, type SeoPluginOption } from '../rest/index.js'
 import { ReusableRun } from '../rest/reusable.js'
 import { INTERNAL_TYPES, SEO_KEYS, isoDate, mapSeoMeta, positiveId } from '../postmeta.js'
 import { DumpError, readDump, type DumpEvent, type DumpInput, type SqlValue } from './dump.js'
+import { TABLE_PREFIX, type WpConfigPrefix } from './prefix.js'
 
 export { DumpError, type DumpInput } from './dump.js'
 
@@ -18,7 +19,10 @@ export interface SqlExtractorOptions {
   file: string | DumpInput
   /** The dump is a slice of `file` (database.sql inside a .wpress backup). */
   range?: { start: number; length: number }
+  /** The configured prefix. Left out, it is detected: from `wpConfig` when the dump agrees, else from the dump's tables. */
   tablePrefix?: string
+  /** `$table_prefix` from the backup's wp-config.php (archives), read as text. */
+  wpConfig?: WpConfigPrefix
   statuses?: string[]
   seoPlugin?: SeoPluginOption
   maxBytes?: number
@@ -87,7 +91,11 @@ export class SqlExtractor implements Extractor {
   readonly name = 'sql' as const
   readonly #file: string | DumpInput
   readonly #range: { start: number; length: number } | undefined
-  readonly #prefix: string
+  readonly #configured: string | undefined
+  readonly #wpConfig: WpConfigPrefix | undefined
+  /** The prefix in use: set by the index (configured or detected) before any rows are read again. */
+  #prefix = ''
+  #prefixInfo: TablePrefixInfo | undefined
   readonly #statuses: Set<string>
   readonly #seoPlugin: SeoPluginOption
   readonly #maxBytes: number | undefined
@@ -97,7 +105,8 @@ export class SqlExtractor implements Extractor {
   constructor(o: SqlExtractorOptions) {
     this.#file = typeof o.file === 'string' ? path.resolve(o.file) : o.file
     this.#range = o.range
-    this.#prefix = o.tablePrefix ?? 'wp_'
+    this.#configured = o.tablePrefix
+    this.#wpConfig = o.wpConfig
     this.#statuses = new Set(o.statuses ?? ['publish'])
     this.#seoPlugin = o.seoPlugin ?? 'auto'
     this.#maxBytes = o.maxBytes
@@ -123,6 +132,7 @@ export class SqlExtractor implements Extractor {
         users: ix.users.length,
       },
     }
+    if (this.#prefixInfo) info.tablePrefix = { ...this.#prefixInfo }
     if (ix.seo.yoast) info.seoPlugin = 'yoast'
     else if (ix.seo.rankmath) info.seoPlugin = 'rankmath'
     const other = [...ix.other].map(([type, n]) => ({ type, count: n }))
@@ -254,102 +264,214 @@ export class SqlExtractor implements Extractor {
   }
 
   async #buildIndex(): Promise<SqlIndex> {
-    const ix: SqlIndex = {
-      options: new Map(), users: [], terms: [], postTerms: new Map(), categoriesOf: new Map(),
-      meta: new Map(), posts: new Map(), blocks: new Map(), other: new Map(), seo: { yoast: false, rankmath: false },
+    const explicit = this.#configured
+    const hint = explicit === undefined && this.#wpConfig?.status === 'found' ? this.#wpConfig.prefix : undefined
+    let scan = await this.#scan(explicit ?? hint)
+    let prefix: string
+    let from: TablePrefixInfo['from']
+    let note: string | undefined
+    if (explicit === undefined && this.#wpConfig?.status === 'invalid') note = `wp-config.php was ignored: ${this.#wpConfig.reason}`
+    if (explicit !== undefined) {
+      if (!scan.seen.get(explicit)?.has('posts')) {
+        const found = scan.installs()
+        throw new DumpError(
+          'DUMP_NO_WORDPRESS',
+          found.length
+            ? `The dump has no ${explicit}posts table. Its WordPress tables use the prefix ${quoted(found)}: set source.tablePrefix to it, or leave tablePrefix out to detect it.`
+            : 'The dump has no WordPress tables (no posts table found).',
+        )
+      }
+      prefix = explicit
+      from = 'config'
+    } else if (hint !== undefined && scan.installs().includes(hint)) {
+      // wp-config.php names the install this backup belongs to, also when the dump holds others.
+      prefix = hint
+      from = 'wp-config.php'
+    } else {
+      if (hint !== undefined) {
+        note = `wp-config.php was ignored: the dump has no complete set of tables with its prefix ${quoted([hint])}`
+        // Rows were read for the wp-config.php prefix only; read again for every install.
+        scan = await this.#scan(undefined)
+      }
+      const installs = scan.installs()
+      if (installs.length > 1) {
+        throw new DumpError(
+          'DUMP_MULTIPLE_SITES',
+          `The dump holds more than one WordPress site, with the table prefixes ${quoted(installs)}${scan.stopped ? ' (and maybe more)' : ''}.\nSet source.tablePrefix to the one to migrate (for wp2payload scan, pass --table-prefix).`,
+        )
+      }
+      if (installs.length === 0) {
+        const partial = [...scan.seen].filter(([, t]) => t.has('posts')).map(([p]) => p)
+        throw new DumpError(
+          'DUMP_NO_WORDPRESS',
+          partial.length
+            ? `The dump has no complete WordPress tables: the prefix ${quoted(partial)} has a posts table but not both postmeta and options.\nIf this is the site, set source.tablePrefix to it.`
+            : 'The dump has no WordPress tables (no posts table found).',
+        )
+      }
+      prefix = installs[0]!
+      from = 'dump'
     }
-    const names = new Map<number, number>() // term id → term_taxonomy_id
-    const taxonomy: Row[] = []
-    const relations: [number, number][] = []
-    const termRows = new Map<number, Row>()
-    const tables = new Set<string>()
-    for await (const e of this.#events(new Set(TABLES))) {
+    this.#prefix = prefix
+    this.#prefixInfo = { value: prefix, from, ...(note ? { note } : {}) }
+    const ix = (scan.builders.get(prefix) ?? new IndexBuilder()).finish()
+    if (!/^https?:\/\//i.test(siteUrlOf(ix))) throw new DumpError('DUMP_NO_WORDPRESS', 'The dump has no http(s) site address (home or siteurl option).')
+    return ix
+  }
+
+  /**
+   * One pass over the dump: the tables seen under every prefix, and an index per prefix of the rows
+   * read. With `only`, rows are read for that prefix alone. Without it every install is indexed, and
+   * the pass stops as soon as a second complete install shows up (the run is refused then), so a
+   * multisite dump is not read to the end.
+   */
+  async #scan(only: string | undefined): Promise<TableScan> {
+    const seen = new Map<string, Set<Table>>()
+    const builders = new Map<string, IndexBuilder>()
+    const installs = () => [...seen].filter(([, t]) => INSTALL_TABLES.every((name) => t.has(name))).map(([p]) => p)
+    let stopped = false
+    const tables = {
+      has: (name: string) => {
+        const s = splitTable(name)
+        return s !== undefined && (only === undefined || s.prefix === only)
+      },
+    }
+    const opts = { tables, ...(this.#maxBytes !== undefined ? { maxBytes: this.#maxBytes } : {}), ...(this.#range ? { range: this.#range } : {}) }
+    for await (const e of readDump(this.#file, opts)) {
+      const s = splitTable(e.table)
+      if (!s) continue
       if (e.kind === 'table') {
-        tables.add(e.table)
+        let names = seen.get(s.prefix)
+        if (!names) seen.set(s.prefix, (names = new Set()))
+        names.add(s.table)
+        if (only === undefined && installs().length > 1) {
+          stopped = true
+          break
+        }
         continue
       }
-      const table = e.table.slice(this.#prefix.length) as Table
-      const r = pick(table, e)
-      switch (table) {
-        case 'options':
-          if (r['option_name'] && OPTIONS.has(r['option_name'])) ix.options.set(r['option_name'], r['option_value'] ?? '')
-          break
-        case 'users':
-          ix.users.push(r)
-          break
-        case 'postmeta': {
-          const id = positiveId(r['post_id'] ?? undefined)
-          const key = r['meta_key'] ?? ''
-          if (key.startsWith('_yoast_wpseo_')) ix.seo.yoast = true
-          else if (key.startsWith('rank_math_')) ix.seo.rankmath = true
-          if (id === undefined || !META_KEYS.has(key)) break
-          let m = ix.meta.get(id)
-          if (!m) ix.meta.set(id, (m = new Map()))
-          if (!m.has(key)) m.set(key, r['meta_value'] ?? '')
-          break
+      let b = builders.get(s.prefix)
+      if (!b) builders.set(s.prefix, (b = new IndexBuilder()))
+      b.add(s.table, pick(s.table, e))
+    }
+    return { seen, builders, installs, stopped }
+  }
+}
+
+/** The tables that make a prefix a WordPress install. */
+const INSTALL_TABLES: readonly Table[] = ['posts', 'postmeta', 'options']
+
+interface TableScan {
+  seen: Map<string, Set<Table>>
+  builders: Map<string, IndexBuilder>
+  /** Prefixes that have every table of INSTALL_TABLES, in dump order. */
+  installs(): string[]
+  /** The pass stopped early, at the second install. */
+  stopped: boolean
+}
+
+/** Prefixes for a message: they passed TABLE_PREFIX, so they are safe to print. */
+const quoted = (prefixes: string[]) =>
+  prefixes.slice(0, 10).map((p) => `"${p}"`).join(', ') + (prefixes.length > 10 ? ` and ${prefixes.length - 10} more` : '')
+
+/** A table name as prefix and WordPress table (`wp_2_posts` is `wp_2_` + `posts`); undefined for any other table. */
+export function splitTable(name: string): { prefix: string; table: Table } | undefined {
+  // No name in TABLES ends with another one, so at most one can match.
+  for (const table of TABLES) {
+    if (name.length <= table.length || !name.endsWith(table)) continue
+    const prefix = name.slice(0, -table.length)
+    return TABLE_PREFIX.test(prefix) ? { prefix, table } : undefined
+  }
+  return undefined
+}
+
+/** The index of one install, built row by row. */
+class IndexBuilder {
+  readonly #ix: SqlIndex = {
+    options: new Map(), users: [], terms: [], postTerms: new Map(), categoriesOf: new Map(),
+    meta: new Map(), posts: new Map(), blocks: new Map(), other: new Map(), seo: { yoast: false, rankmath: false },
+  }
+  readonly #names = new Map<number, number>() // term id → term_taxonomy_id
+  readonly #taxonomy: Row[] = []
+  readonly #relations: [number, number][] = []
+  readonly #termRows = new Map<number, Row>()
+
+  add(table: Table, r: Row): void {
+    const ix = this.#ix
+    switch (table) {
+      case 'options':
+        if (r['option_name'] && OPTIONS.has(r['option_name'])) ix.options.set(r['option_name'], r['option_value'] ?? '')
+        break
+      case 'users':
+        ix.users.push(r)
+        break
+      case 'postmeta': {
+        const id = positiveId(r['post_id'] ?? undefined)
+        const key = r['meta_key'] ?? ''
+        if (key.startsWith('_yoast_wpseo_')) ix.seo.yoast = true
+        else if (key.startsWith('rank_math_')) ix.seo.rankmath = true
+        if (id === undefined || !META_KEYS.has(key)) break
+        let m = ix.meta.get(id)
+        if (!m) ix.meta.set(id, (m = new Map()))
+        if (!m.has(key)) m.set(key, r['meta_value'] ?? '')
+        break
+      }
+      case 'posts': {
+        const id = positiveId(r['ID'] ?? undefined)
+        if (id === undefined) break
+        const type = r['post_type'] ?? ''
+        const status = r['post_status'] ?? ''
+        ix.posts.set(id, {
+          id, type, status, name: r['post_name'] ?? '', parent: positiveId(r['post_parent'] ?? undefined) ?? 0,
+          author: positiveId(r['post_author'] ?? undefined) ?? 0, date: r['post_date'] ?? '', title: type === 'attachment' ? r['post_title'] ?? '' : '',
+          excerpt: type === 'attachment' ? r['post_excerpt'] ?? '' : '', guid: r['guid'] ?? '', mime: r['post_mime_type'] ?? '',
+        })
+        if (type === 'wp_block') ix.blocks.set(id, { status, html: r['post_content'] ?? '' })
+        else if (type && !NOT_CONTENT_TYPES.has(type) && !INTERNAL_TYPES.has(type) && !type.startsWith('wp_') && status !== 'trash' && status !== 'auto-draft' && status !== 'inherit') {
+          const name = toPlainText(type).slice(0, 64)
+          ix.other.set(name, (ix.other.get(name) ?? 0) + 1)
         }
-        case 'posts': {
-          const id = positiveId(r['ID'] ?? undefined)
-          if (id === undefined) break
-          const type = r['post_type'] ?? ''
-          const status = r['post_status'] ?? ''
-          ix.posts.set(id, {
-            id, type, status, name: r['post_name'] ?? '', parent: positiveId(r['post_parent'] ?? undefined) ?? 0,
-            author: positiveId(r['post_author'] ?? undefined) ?? 0, date: r['post_date'] ?? '', title: type === 'attachment' ? r['post_title'] ?? '' : '',
-            excerpt: type === 'attachment' ? r['post_excerpt'] ?? '' : '', guid: r['guid'] ?? '', mime: r['post_mime_type'] ?? '',
-          })
-          if (type === 'wp_block') ix.blocks.set(id, { status, html: r['post_content'] ?? '' })
-          else if (type && !NOT_CONTENT_TYPES.has(type) && !INTERNAL_TYPES.has(type) && !type.startsWith('wp_') && status !== 'trash' && status !== 'auto-draft' && status !== 'inherit') {
-            const name = toPlainText(type).slice(0, 64)
-            ix.other.set(name, (ix.other.get(name) ?? 0) + 1)
-          }
-          break
-        }
-        case 'terms': {
-          const id = positiveId(r['term_id'] ?? undefined)
-          if (id !== undefined) termRows.set(id, r)
-          break
-        }
-        case 'term_taxonomy':
-          taxonomy.push(r)
-          break
-        case 'term_relationships': {
-          const object = positiveId(r['object_id'] ?? undefined)
-          const tt = positiveId(r['term_taxonomy_id'] ?? undefined)
-          if (object !== undefined && tt !== undefined) relations.push([object, tt])
-          break
-        }
+        break
+      }
+      case 'terms': {
+        const id = positiveId(r['term_id'] ?? undefined)
+        if (id !== undefined) this.#termRows.set(id, r)
+        break
+      }
+      case 'term_taxonomy':
+        this.#taxonomy.push(r)
+        break
+      case 'term_relationships': {
+        const object = positiveId(r['object_id'] ?? undefined)
+        const tt = positiveId(r['term_taxonomy_id'] ?? undefined)
+        if (object !== undefined && tt !== undefined) this.#relations.push([object, tt])
+        break
       }
     }
-    if (!tables.has(`${this.#prefix}posts`)) {
-      const found = [...tables].filter((t) => t.endsWith('posts') && tables.has(`${t.slice(0, -5)}options`)).map((t) => t.slice(0, -5))
-      throw new DumpError(
-        'DUMP_NO_WORDPRESS',
-        found.length
-          ? `The dump has no ${this.#prefix}posts table. Its WordPress tables use the prefix ${found.map((p) => `"${p}"`).join(', ')}: set source.tablePrefix.`
-          : 'The dump has no WordPress tables (no posts table found).',
-      )
-    }
+  }
+
+  finish(): SqlIndex {
+    const ix = this.#ix
     // Terms: only categories and tags, with parents as term ids.
     const taxOf = new Map<number, string>() // term_taxonomy_id → taxonomy
     const termOf = new Map<number, number>() // term_taxonomy_id → term id
-    for (const t of taxonomy) {
+    for (const t of this.#taxonomy) {
       const tt = positiveId(t['term_taxonomy_id'] ?? undefined)
       const termId = positiveId(t['term_id'] ?? undefined)
       const tax = t['taxonomy'] ?? ''
       if (tt === undefined || termId === undefined || (tax !== 'category' && tax !== 'post_tag')) continue
       taxOf.set(tt, tax)
       termOf.set(tt, termId)
-      const row = termRows.get(termId)
-      if (!row || names.has(termId)) continue
-      names.set(termId, tt)
+      const row = this.#termRows.get(termId)
+      if (!row || this.#names.has(termId)) continue
+      this.#names.set(termId, tt)
       const term: IRTerm = { wpId: termId, taxonomy: tax, name: toPlainText(row['name'] ?? ''), slug: normaliseSlug(row['slug'] ?? '') }
       const parent = positiveId(t['parent'] ?? undefined)
       if (parent !== undefined && parent !== termId) term.parentWpId = parent
       if (t['description']) term.description = toPlainText(t['description'])
       ix.terms.push(term)
     }
-    for (const [object, tt] of relations) {
+    for (const [object, tt] of this.#relations) {
       const termId = termOf.get(tt)
       if (termId === undefined) continue
       const list = ix.postTerms.get(object) ?? []
@@ -362,7 +484,6 @@ export class SqlExtractor implements Extractor {
       }
     }
     for (const cats of ix.categoriesOf.values()) cats.sort((a, b) => a - b)
-    if (!/^https?:\/\//i.test(siteUrlOf(ix))) throw new DumpError('DUMP_NO_WORDPRESS', 'The dump has no http(s) site address (home or siteurl option).')
     return ix
   }
 }

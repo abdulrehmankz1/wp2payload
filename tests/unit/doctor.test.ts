@@ -128,6 +128,51 @@ describe('runDoctor', () => {
     expect(output()).toMatch(/✔ Uploads folder \.\/uploads/)
   })
 
+  it('prints the table prefix a dump is read with, and passes none when it is left to detection', async () => {
+    await writeConfig(`export default { source: { type: 'sql', file: './db.sql', uploadsDir: '.' } }`)
+    const calls: (string | undefined)[] = []
+    const code = await runDoctor({
+      cwd: root,
+      log,
+      createSqlExtractor: (_f, prefix) => {
+        calls.push(prefix)
+        return { probe: async () => ({ siteUrl: 'https://old.example', counts: {}, tablePrefix: { value: 'abc_', from: 'dump' as const } }) }
+      },
+    })
+    expect(code).toBe(0)
+    expect(calls).toEqual([undefined])
+    expect(output()).toMatch(/✔ Table prefix abc_ \(detected from the dump\)/)
+  })
+
+  describe('author accounts (SEC-01)', () => {
+    const rest = (extra = '') => `export default { source: { type: 'rest', url: 'https://example.com' }, collections: { author: { to: 'users' } }${extra} }`
+    const createExtractor = () => ({ probe: async () => ({ siteUrl: 'https://example.com', counts: {} }), rankMathHeadless: async () => 'on' as const })
+    const payloadWith = (auth: boolean) => async () => ({ collections: [{ slug: 'users', auth: auth ? {} : undefined }] })
+
+    it('exits 2 when authors map into an auth collection without authors.createAccounts, as migrate would', async () => {
+      await writeConfig(rest())
+      expect(await runDoctor({ cwd: root, log, createExtractor, loadPayloadConfig: payloadWith(true) })).toBe(2)
+      expect(output()).toMatch(/✖ Authors map into users, an auth collection, so each would get a login account\n[\s\S]*authors: \{ createAccounts: true \}/)
+    })
+
+    it('warns, and passes, with the opt-in; says nothing for a collection without auth', async () => {
+      await writeConfig(rest(', authors: { createAccounts: true }'))
+      expect(await runDoctor({ cwd: root, log, createExtractor, loadPayloadConfig: payloadWith(true) })).toBe(0)
+      expect(output()).toMatch(/! Authors become login accounts in users \(authors\.createAccounts\)/)
+      lines = []
+      await writeConfig(rest())
+      expect(await runDoctor({ cwd: root, log, createExtractor, loadPayloadConfig: payloadWith(false) })).toBe(0)
+      expect(output()).not.toMatch(/login account/)
+    })
+
+    it('warns when the Payload config cannot be read, and leaves the check to migrate', async () => {
+      await writeConfig(rest())
+      const code = await runDoctor({ cwd: root, log, createExtractor, loadPayloadConfig: async () => { throw new Error('boom\nstack') } })
+      expect(code).toBe(0)
+      expect(output()).toMatch(/! Could not read the Payload config, so author accounts were not checked\n\s+boom\n\s+migrate runs this check/)
+    })
+  })
+
   it('fails on a .wpress backup that cannot be read', async () => {
     await writeConfig(`export default { source: { type: 'wpress', file: './site.wpress' } }`)
     expect(await runDoctor({ cwd: root, log })).toBe(1)
