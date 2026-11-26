@@ -61,6 +61,7 @@
     "jiti": "^2.7.0",
     "sanitize-html": "^2.18.1",
     "sharp": "~0.35.5",
+    "yauzl": "^3.4.0",
     "zod": "^4.6.7"
   },
   "peerDependencies": {
@@ -72,14 +73,15 @@
     }
   },
   "devDependencies": {
-    "@payloadcms/db-sqlite": "3.92.1",
-    "@payloadcms/plugin-redirects": "3.92.1",
-    "@payloadcms/richtext-lexical": "3.92.1",
+    "@payloadcms/db-sqlite": "3.93.0",
+    "@payloadcms/plugin-redirects": "3.93.0",
+    "@payloadcms/richtext-lexical": "3.93.0",
     "@types/node": "^22.20.5",
     "@types/sanitize-html": "^2.16.2",
+    "@types/yauzl": "^3.4.0",
     "fast-check": "^4.10.2",
     "graphql": "^16.14.2",
-    "payload": "3.92.1",
+    "payload": "3.93.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tsup": "^9.0.0",

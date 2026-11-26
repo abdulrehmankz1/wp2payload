@@ -6,7 +6,7 @@ import type { ScanReport } from './run.js'
 // The scan as one self-contained HTML page: a deliverable an agency can hand to a client (doc
 // 12.11). Escaping, layout and the Content-Security-Policy live in report/html.ts.
 
-const SOURCES: Record<ScanReport['source'], string> = { rest: 'live site (REST API)', wxr: 'WordPress export file', sql: 'SQL backup', wpress: 'All-in-One WP Migration backup' }
+const SOURCES: Record<ScanReport['source'], string> = { rest: 'live site (REST API)', wxr: 'WordPress export file', sql: 'SQL backup', wpress: 'All-in-One WP Migration backup', archive: 'zip or tar backup' }
 
 export function renderScanHtml(r: ScanReport, opts: { version: string }): string {
   const findings = [...r.security.findings].sort((a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || a.code.localeCompare(b.code))

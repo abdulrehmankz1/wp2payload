@@ -33,12 +33,24 @@ const wxrSource = z.strictObject({
   url: httpUrl.optional(),
 })
 
-const sqlSource = z.strictObject({
-  type: z.literal('sql'),
-  file: nonEmpty('a path to the SQL dump'),
-  uploadsDir: nonEmpty('a path to the uploads directory'),
-  tablePrefix: z.string().min(1, 'expected a non-empty table prefix').default('wp_'),
-})
+const tablePrefix = z.string().min(1, 'expected a non-empty table prefix').default('wp_')
+
+// A SQL dump (.sql, .sql.gz, UpdraftPlus *-db.gz) with the uploads as a folder (uploadsDir) or as
+// one or more archives (uploads: UpdraftPlus *-uploads.zip, split ones too, or .tar.gz).
+const sqlSource = z
+  .strictObject({
+    type: z.literal('sql'),
+    file: nonEmpty('a path to the SQL dump'),
+    uploadsDir: nonEmpty('a path to the uploads directory').optional(),
+    uploads: z
+      .union([nonEmpty('a path to an uploads archive'), z.array(nonEmpty('a path to an uploads archive')).min(1, 'expected at least one uploads archive')])
+      .optional(),
+    tablePrefix,
+  })
+  .refine((s) => (s.uploadsDir === undefined) !== (s.uploads === undefined), {
+    error: 'expected either a path to the uploads directory, or uploads: the uploads archive(s), not both',
+    path: ['uploadsDir'],
+  })
 
 // An All-in-One WP Migration backup: database and uploads are read from the archive in place.
 const wpressSource = z.strictObject({
@@ -46,8 +58,15 @@ const wpressSource = z.strictObject({
   file: nonEmpty('a path to the .wpress backup'),
 })
 
-const source = z.discriminatedUnion('type', [restSource, wxrSource, sqlSource, wpressSource], {
-  error: "expected source.type to be one of 'rest', 'wxr', 'sql', 'wpress'",
+// A zip or tar backup with the dump and wp-content/uploads inside (Duplicator, hand-made archives).
+const archiveSource = z.strictObject({
+  type: z.literal('archive'),
+  file: nonEmpty('a path to the backup archive (.zip, .tar.gz, .tgz or .tar)'),
+  tablePrefix,
+})
+
+const source = z.discriminatedUnion('type', [restSource, wxrSource, sqlSource, wpressSource, archiveSource], {
+  error: "expected source.type to be one of 'rest', 'wxr', 'sql', 'wpress', 'archive'",
 })
 
 const collection = z.strictObject({

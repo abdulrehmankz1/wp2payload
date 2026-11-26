@@ -80,14 +80,17 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
   let source: OpenedSource
   // The configured URL wins; without one, an export file or dump names its own site.
   let siteUrl: string
+  let opened: OpenedSource | undefined
   try {
-    source = opts.createExtractor
+    source = opened = opts.createExtractor
       ? { extractor: opts.createExtractor(config), trustSiteHost: config.source.type === 'rest', label: 'WordPress at', ...(config.source.type === 'rest' ? { configuredUrl: config.source.url } : {}) }
       : await openSource(config, cwd)
     const info = await source.extractor.probe()
     siteUrl = source.configuredUrl ?? info.siteUrl
     log(formatLine('ok', `${source.label} ${clean(info.siteUrl)}`))
   } catch (error) {
+    // Unset when openSource itself failed; it cleans up after itself then.
+    await opened?.close?.()
     if (!isSourceError(error)) throw error
     const [title = error.message, ...rest] = error.message.split('\n')
     log(rest.length ? formatLine('fail', title, rest.join('\n')) : formatLine('fail', title))
@@ -98,6 +101,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
   try {
     booted = await (opts.boot ?? ((c, p) => bootPayload(p ? { cwd: c, configPath: p } : { cwd: c })))(cwd, env['PAYLOAD_CONFIG_PATH'])
   } catch (error) {
+    await source.close?.()
     if (!(error instanceof PayloadBootError)) throw error
     log(formatLine('fail', error.message))
     return error.exitCode
@@ -199,6 +203,7 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     process.off('SIGINT', onSigint)
     await downloadCache?.dispose()
     await booted.close()
+    await source.close?.()
   }
 }
 
