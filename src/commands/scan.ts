@@ -7,6 +7,7 @@ import { isSourceError, openSource, type OpenedSource } from '../extractors/sour
 import { ensureWorkDir } from '../migrate/workdir.js'
 import { loadApprovals } from '../review/store.js'
 import { SEVERITY_RANK } from '../report/build.js'
+import { withoutEmails } from '../report/pii.js'
 import { clean, formatDuration, issueLines, securityLines } from '../report/summary.js'
 import type { Severity } from '../report/types.js'
 import { renderScanHtml } from '../scan/html.js'
@@ -116,6 +117,8 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
     return 1
   }
 
+  // A scan never reads author emails, but warnings can quote content that holds addresses.
+  report = withoutEmails(report)
   const dir = await ensureWorkDir(cwd)
   await writeFile(path.join(dir, SCAN_JSON), JSON.stringify(report, null, 2) + '\n', 'utf8')
   await writeFile(path.join(dir, SCAN_HTML), renderScanHtml(report, { version: opts.version ?? 'dev' }), 'utf8')

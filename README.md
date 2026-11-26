@@ -114,6 +114,8 @@ folder above that has `wp2payload.config.ts`, without going past your project's 
 | `--fail-on-security <level>` | Exit with code 4 when findings at `low`, `medium` or `high` exist |
 | `--allow-svg` | Accept SVG uploads after a strict check |
 | `--allow-embed-host <host>` | Trust another iframe host (YouTube and Vimeo are trusted by default) |
+| `--invite-users` | When authors map into an auth collection, email each new account a password-set link (see [Authors as login accounts](#authors-as-login-accounts)) |
+| `--include-pii` | Allow author emails in the report; by default the report and the output hold no email addresses |
 | `--yes` | Skip the first-run confirmation (for CI) |
 | `--verbose` | List every warning and skipped phase |
 
@@ -272,7 +274,7 @@ deleted is pointed at the migrated document.
 | Reusable blocks (synced patterns) | Inlined into each document that uses them, nested ones included. With credentials they are read from `/wp/v2/blocks`; without, WordPress serves rendered content that already contains them |
 | Media | Your upload collection, deduplicated by content hash, with alt text and caption |
 | Categories (with hierarchy) and tags | Your mapped collections |
-| Authors | Name and slug only, and only users who wrote migrated content |
+| Authors | Name and slug only, and only users who wrote migrated content. Into an auth collection (opt-in, see [Authors as login accounts](#authors-as-login-accounts)) also the email |
 | Yoast SEO and Rank Math | The SEO group (`meta` by default): title, description, image, and noindex and off-site canonicals when your group has them. Rank Math needs **Headless CMS Support** turned on (General Settings → Others); `doctor` tells you when it is off |
 | Old URLs | Redirects |
 
@@ -285,6 +287,26 @@ Pages built with Elementor, Divi, WPBakery or Beaver Builder keep their text, im
 links but not their layout; shortcodes stay as text; other post types (such as WooCommerce
 products) are not migrated yet. Each of these is listed in the report, and `doctor` names the
 post types it will skip.
+
+### Authors as login accounts
+
+The blog preset maps WordPress users into a plain `authors` collection. To make them Payload
+accounts instead, point `collections.author.to` at an auth collection (one with `auth`) that has
+the `wpMeta` field. wp2payload notices the `auth` setting and then:
+
+- creates each user with their WordPress email and a random 32-byte password that is never shown,
+  logged or saved anywhere (WordPress password hashes cannot be reused);
+- with `--invite-users`, sends Payload's forgot-password email to each account it created, so the
+  user sets their own password. Your Payload config needs an email adapter; without one the run
+  stops before writing, because Payload would only print the emails to its log. A dry run and a
+  re-run send nothing. Without `--invite-users`, users can use "Forgot password" on the login page;
+- never links to or changes an account it did not create, even with the same email
+  (`AUTHOR_EMAIL_IN_USE`), and never migrates roles. Check your collection's access rules and any
+  default role first: every invited user can log in.
+
+Emails come only from the REST source with an Application Password that can list users; export
+files and SQL dumps are read without them, so their users are reported as `AUTHOR_NO_EMAIL`.
+Reports leave out email addresses unless you pass `--include-pii`.
 
 ## Reviewing quarantine
 

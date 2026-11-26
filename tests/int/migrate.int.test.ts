@@ -206,6 +206,20 @@ describe('runPipeline', () => {
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(all)
   })
 
+  it('the report holds no email addresses unless includePii', async () => {
+    const origin = 'https://pii.test'
+    const { config, site } = setup(origin, [])
+    const ex = (): Extractor => ({
+      ...extractor(origin, []),
+      setWarningSink: (sink) => sink?.({ code: 'TEST_PII', detail: 'Contact ann@example.com about logo@2x.png' }),
+    })
+    const base = { root, config, payload: t.payload, site, dryRun: true, only: ['documents'] }
+    const safe = await runPipeline({ ...base, extractor: ex() })
+    expect(safe.warnings[0]!.detail).toBe('Contact [email] about logo@2x.png')
+    const full = await runPipeline({ ...base, extractor: ex(), includePii: true })
+    expect(full.warnings[0]!.detail).toBe('Contact ann@example.com about logo@2x.png')
+  })
+
   it('--only limits phases and document types', async () => {
     const origin = 'https://three.test'
     const docs = [doc(origin, 100, 'post'), doc(origin, 200, 'page')]

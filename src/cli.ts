@@ -80,6 +80,8 @@ program
   .addOption(new Option('--fail-on-security <level>', 'exit with code 4 if findings at or above this level exist').choices(['low', 'medium', 'high']))
   .option('--allow-svg', 'accept SVG uploads after a strict check')
   .option('--allow-embed-host <host>', 'add a trusted iframe host (repeatable)', list)
+  .option('--invite-users', 'email a password-set link to each new user when authors map into an auth collection')
+  .option('--include-pii', 'allow author emails in the report (left out by default)')
   .option('--yes', 'skip the first-run confirmation (for CI)')
   .option('--verbose', 'per-item logging')
   .action(async (opts: MigrateCliOptions) => {
@@ -98,6 +100,8 @@ program
       ...(opts.failOnSecurity ? { failOnSecurity: opts.failOnSecurity } : {}),
       allowSvg: opts.allowSvg === true,
       allowEmbedHosts: opts.allowEmbedHost ?? [],
+      inviteUsers: opts.inviteUsers === true,
+      includePii: opts.includePii === true,
       yes: opts.yes === true,
       verbose: opts.verbose === true,
     })
@@ -196,6 +200,8 @@ interface MigrateCliOptions {
   failOnSecurity?: 'low' | 'medium' | 'high'
   allowSvg?: boolean
   allowEmbedHost?: string[]
+  inviteUsers?: boolean
+  includePii?: boolean
   yes?: boolean
   verbose?: boolean
 }

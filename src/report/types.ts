@@ -31,7 +31,7 @@ export interface ReportSink {
   finding(finding: SecurityFinding): void
 }
 
-/** `.wp2payload/report.json` (doc 4.9). PII-free: no emails, no passwords, no tokens. */
+/** `.wp2payload/report.json` (doc 4.9). No passwords or tokens; no emails unless `--include-pii`. */
 export interface ReportJson {
   version: 1
   dryRun: boolean
@@ -45,6 +45,8 @@ export interface ReportJson {
   errors: Issue[]
   /** `file` is set when redirects.json was written instead of a redirects collection. */
   redirects?: { count: number; conflicts: number; file?: string }
+  /** `--invite-users` into an auth collection: password-set emails sent (a dry run: would send) and failed. No addresses. */
+  invitations?: { sent: number; failed: number }
   security: { summary: Record<Severity, number>; findings: SecurityFinding[] }
   /** Set when the run stopped early (error-rate threshold, fatal error). */
   stopped?: { phase: string; reason: string }

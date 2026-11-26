@@ -10,6 +10,7 @@ import { loadRedirects } from '../loaders/redirects.js'
 import { loadTerms } from '../loaders/terms.js'
 import type { DocumentTarget, LoaderContext, RedirectSource } from '../loaders/types.js'
 import { buildReport } from '../report/build.js'
+import { withoutEmails } from '../report/pii.js'
 import { MemoryReport, type ReportJson } from '../report/types.js'
 import { resolve, StateStore } from '../state/store.js'
 import { errorRateExceeded, flagLinkHeavy } from './guards.js'
@@ -51,6 +52,10 @@ export interface PipelineOptions {
   fresh?: boolean
   allowSvg?: boolean
   allowEmbedHosts?: readonly string[]
+  /** `--invite-users`: password-set emails for users created in an auth collection (real runs only). */
+  inviteUsers?: boolean
+  /** `--include-pii`: author emails may appear in the report; otherwise every address is removed. */
+  includePii?: boolean
   /** Shared by the first-run preview and the real run, so media is downloaded once. */
   downloadCache?: DownloadCache
   /** Set by Ctrl+C; checked between items. */
@@ -121,6 +126,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   // Documents planned in a dry run (they have no Payload ID yet).
   const planned = new Set<string>()
   let redirects: ReportJson['redirects']
+  let invitations: ReportJson['invitations']
   try {
     // Every document is extracted, even with --only or --limit: the URL resolver needs every
     // permalink, or a targeted run would turn correct internal links back into old-site URLs.
@@ -173,7 +179,13 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     })
     await run('authors', kinds.author !== undefined, async () => {
       // Doc 12.9: only users with migrated content.
-      await loadAuthors(ctx, o.extractor.authors(), { include: authorsWithContent, shouldStop })
+      const result = await loadAuthors(ctx, o.extractor.authors(), {
+        include: authorsWithContent,
+        shouldStop,
+        invite: o.inviteUsers === true,
+        includePii: o.includePii === true,
+      })
+      invitations = result.invitations
       return undefined
     })
 
@@ -250,7 +262,7 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
   }
 
   flagLinkHeavy(report, links)
-  return buildReport(report, {
+  const json = buildReport(report, {
     site: o.site,
     dryRun: o.dryRun,
     startedAt,
@@ -258,6 +270,9 @@ export async function runPipeline(o: PipelineOptions): Promise<ReportJson> {
     ...(stopped ? { stopped } : {}),
     ...(redirects ? { redirects } : {}),
   })
+  if (invitations) json.invitations = { ...invitations }
+  // Everything the CLI prints and report.json holds comes from this object (doc 4.2 --include-pii).
+  return o.includePii ? json : withoutEmails(json)
 }
 
 const DRY_RUN_ID = 'dry-run'

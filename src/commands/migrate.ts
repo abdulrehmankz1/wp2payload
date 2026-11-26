@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { createInterface } from 'node:readline/promises'
-import type { Payload } from 'payload'
+import type { CollectionSlug, Payload } from 'payload'
+import { authOf } from '../loaders/authors.js'
 import { ConfigError, DEFAULT_CONFIG_FILE, loadConfig, type ResolvedConfig } from '../config/index.js'
 import type { Env } from '../config/types.js'
 import { isSourceError, openSource, type OpenedSource } from '../extractors/source.js'
@@ -33,6 +34,10 @@ export interface MigrateOptions {
   failOnSecurity?: Severity
   allowSvg?: boolean
   allowEmbedHosts?: string[]
+  /** Send password-set emails to users created in an auth collection (doc 2.6). */
+  inviteUsers?: boolean
+  /** Allow author emails in the report; by default it holds no email addresses. */
+  includePii?: boolean
   yes?: boolean
   verbose?: boolean
   env?: Env
@@ -113,6 +118,11 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     const failed = checks.filter((c) => c.status === 'fail')
     for (const c of opts.verbose ? checks : failed) log(formatLine(c.status, c.title, c.detail))
     if (failed.length) return 1
+    const invite = inviteCheck(booted.payload, config, opts.inviteUsers === true)
+    if (invite) {
+      log(formatLine(invite.status, invite.title, invite.detail))
+      if (invite.status === 'fail') return 1
+    }
 
     const site = siteKey(siteUrl)
     const approvals = await loadApprovals(cwd)
@@ -138,6 +148,8 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
         fresh: opts.fresh === true,
         allowSvg: opts.allowSvg === true,
         allowEmbedHosts: opts.allowEmbedHosts ?? [],
+        inviteUsers: opts.inviteUsers === true,
+        includePii: opts.includePii === true,
         ...(downloadCache ? { downloadCache } : {}),
         interrupted: () => interrupted,
         onPhase: (phase, status, why) => progress(log, phase, status, why, opts.verbose === true),
@@ -184,6 +196,35 @@ export async function runMigrate(opts: MigrateOptions = {}): Promise<number> {
     await downloadCache?.dispose()
     await booted.close()
   }
+}
+
+/**
+ * Doc 2.6: what `--invite-users` will do with this Payload. Without an email adapter Payload writes
+ * emails to its log, recipient included, so inviting then fails before anything is written.
+ */
+export function inviteCheck(
+  payload: Payload,
+  config: ResolvedConfig,
+  inviteUsers: boolean,
+): { status: 'ok' | 'warn' | 'fail'; title: string; detail?: string } | undefined {
+  const to = config.collections['author']?.to as CollectionSlug | undefined
+  const auth = to !== undefined && authOf(payload, to) !== undefined
+  if (!auth) {
+    return inviteUsers
+      ? { status: 'warn', title: '--invite-users has no effect', detail: `Authors are not mapped into an auth collection${to ? ` (${to} has no auth)` : ''}, so no accounts are created.` }
+      : undefined
+  }
+  if (!inviteUsers) {
+    return { status: 'ok', title: `Authors become accounts in ${to}`, detail: 'Each new account gets a random password. Add --invite-users to email a password-set link, or users can use "Forgot password".' }
+  }
+  if (!payload.config.email) {
+    return {
+      status: 'fail',
+      title: '--invite-users needs an email adapter in your Payload config',
+      detail: 'Without one Payload only logs emails. Add email: nodemailerAdapter(...) or resendAdapter(...) to payload.config.ts, or run without --invite-users.',
+    }
+  }
+  return { status: 'ok', title: `New accounts in ${to} get a password-set email`, detail: 'Only accounts created by this run; re-runs send nothing.' }
 }
 
 async function ask(question: string): Promise<boolean> {
