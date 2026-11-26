@@ -46,6 +46,19 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `SEC_FILE_TOO_LARGE` | high | rejected | Over `media.maxFileSizeMB` |
 | `SEC_PATH_TRAVERSAL` | high | rejected | Backup sources: the dump names a media file outside the uploads folder (`../`, an absolute path, or a link that points out) |
 
+### Backup archives
+
+Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of a `sql` source) are checked before anything is read from them. A hostile archive is refused as a whole: `migrate`, `scan` and `doctor` stop with the code in the message, nothing is migrated, and no report is written. Caps and the rules they enforce are in the README under [From a backup](../../README.md#from-a-backup).
+
+| Code | Severity | Action | Meaning |
+| --- | --- | --- | --- |
+| `SEC_ARCHIVE_PATH_TRAVERSAL` | high | refused | An entry name that leaves the archive folder: `..`, an absolute path, a drive letter or a colon, a NUL character, the same tricks with backslashes, or (tar, where files are unpacked) a name Windows reserves for devices |
+| `SEC_ARCHIVE_LINK` | high | refused | A symbolic or hard link entry |
+| `SEC_ARCHIVE_SPECIAL_FILE` | high | refused | A device, FIFO, socket, sparse or other entry that is not a regular file or folder |
+| `SEC_ARCHIVE_TOO_LARGE` | high | refused | The dump and uploads of a zip, or a whole tar, unpack to more than 64 GB |
+| `SEC_ARCHIVE_TOO_MANY_FILES` | high | refused | More than 1,000,000 entries |
+| `SEC_ARCHIVE_RATIO` | high | refused | A zip entry over 1 MB that unpacks to more than 100 times its packed size, or a tar.gz stream that does (zip bomb) |
+
 ## Warnings
 
 | Code | Meaning |
@@ -93,7 +106,7 @@ Severity decides the exit code with `--fail-on-security <level>`. Actions: `remo
 | `MEDIA_NETWORK`, `MEDIA_DNS_FAILED`, `MEDIA_TIMEOUT`, `MEDIA_BAD_URL` | The media file could not be fetched |
 | `MEDIA_LOCAL_UNSUPPORTED` | A media item names a local file but the source has no uploads to read it from |
 | `MEDIA_UPLOADS_MISSING` | SQL source: `source.uploadsDir` does not exist |
-| `MEDIA_READ_FAILED` | .wpress source: a media file could not be read from the archive (it is damaged) |
+| `MEDIA_READ_FAILED` | .wpress or zip backup: a media file could not be read from the archive (it is damaged) |
 | `MEDIA_WRITE_FAILED` | Payload rejected the media upload |
 | `TERM_WRITE_FAILED`, `AUTHOR_WRITE_FAILED` | Payload rejected the write after retries |
 | `REDIRECT_CONFLICT` | Two documents claim the same old URL or the same new path, an old URL equals another document's new path (it would hide that document), or an existing redirect points to another document. The first is kept, nothing is changed, and the phase counts it as `rejected`. A redirect whose document was deleted is repointed instead |

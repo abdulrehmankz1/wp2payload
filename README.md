@@ -36,7 +36,8 @@ WordPress export file or a backup. Safe to re-run, and it keeps a hacked site's 
 - A Payload CMS 3 project (any database adapter)
 - A WordPress site reachable over its REST API, an export file from **Tools → Export**
   (see [From an export file](#from-an-export-file-wxr)), or a backup: a SQL dump with the uploads
-  folder, or an All-in-One WP Migration `.wpress` file (see [From a backup](#from-a-backup)).
+  folder, an All-in-One WP Migration `.wpress` file, or a zip or tar backup such as UpdraftPlus
+  or Duplicator (see [From a backup](#from-a-backup)).
   For the REST API, an
   [Application Password](https://make.wordpress.org/core/2020/11/05/application-passwords-integration-guide/)
   is optional but recommended: without it only published content is read, and
@@ -185,13 +186,34 @@ source: { type: 'sql', file: './backup.sql.gz', uploadsDir: './uploads' },
 
 // Or an All-in-One WP Migration backup, read in place without unpacking
 source: { type: 'wpress', file: './site.wpress' },
+
+// Or an UpdraftPlus backup: the database plus the uploads archive(s), split ones included
+source: { type: 'sql', file: './backup_2026-01-01-1200_Site_abc123-db.gz', uploads: ['./backup_2026-01-01-1200_Site_abc123-uploads.zip', './backup_2026-01-01-1200_Site_abc123-uploads2.zip'] },
+
+// Or one archive with the dump and wp-content/uploads inside: a Duplicator *_archive.zip,
+// or your own .zip, .tar.gz or .tgz (tablePrefix: 'wp_' is the default here too)
+source: { type: 'archive', file: './site_archive.zip' },
 ```
 
 The dump is read as text and never run against a database, so triggers, procedures and the
 rest of a hacked dump have no effect, and only the columns wp2payload needs are kept: password
 hashes and emails are never read. Old URLs are rebuilt from the permalink settings in the dump.
 Media paths from the dump must stay inside the uploads folder or archive. Encrypted `.wpress`
-backups cannot be read.
+and zip backups cannot be read.
+
+In an archive, the dump is Duplicator's `dup-installer/dup-database__*.sql`, else `database.sql`
+at the root, else the one `.sql` or `.sql.gz` file outside `wp-content` (if there are several,
+extract the right one and use a `sql` source). The uploads are the shallowest
+`wp-content/uploads/` folder, or `uploads/` at the root as UpdraftPlus packs it. Zip archives
+are read in place. A `.tar.gz` cannot be read at random, so the dump and the uploads, and
+nothing else, are unpacked once into a private temp folder (`TMPDIR`), which is removed when the
+command ends, also on an error or Ctrl+C.
+
+Every entry is checked before anything is read, and a hostile archive is refused as a whole
+with a `SEC_ARCHIVE_*` code ([codes](docs/reference/codes.md#backup-archives)): names that
+leave the archive (`..`, absolute paths, drive letters, backslash tricks), symbolic and hard
+links, and device files. Zip bombs are capped at 1,000,000 entries, 64 GB unpacked, and a
+compression ratio of 100:1 for anything over 1 MB.
 
 ### Using your existing collections
 
@@ -324,6 +346,9 @@ npx wp2payload scan https://oldsite.com          # WP_USER and WP_APP_PASSWORD f
 npx wp2payload scan ./export.xml
 npx wp2payload scan ./backup.sql.gz --uploads ./uploads
 npx wp2payload scan ./site.wpress
+npx wp2payload scan ./site_archive.zip           # Duplicator, or any .zip/.tar.gz/.tgz with the dump and wp-content/uploads
+npx wp2payload scan ./backup_..._abc123-db.gz    # UpdraftPlus: finds backup_..._abc123-uploads*.zip next to it
+npx wp2payload scan ./db.sql.gz --uploads ./uploads-1.zip --uploads ./uploads-2.zip
 npx wp2payload scan                              # the source in wp2payload.config.ts
 ```
 
