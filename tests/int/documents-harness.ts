@@ -1,12 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { BlocksFeature, LinkFeature, lexicalEditor } from '@payloadcms/richtext-lexical'
 import { buildConfig, getPayload, type CollectionConfig, type Payload } from 'payload'
 import { wpMetaField } from '../../src/loaders/wpmeta.js'
+import { waitForDatabase } from '../../src/payload/ready.js'
+import { closeTestPayload, testDatabase } from './db.js'
 
-// Real Payload + SQLite shaped like the blog preset (doc 4.7): posts with drafts, an SEO `meta`
+// Real Payload (SQLite or MongoDB, see db.ts) shaped like the blog preset (doc 4.7): posts with drafts, an SEO `meta`
 // group, a `heroImage` upload and a Lexical editor with the embed/wpRawHtml blocks; pages with a
 // `parent` and a plain editor; `briefs` whose links reach pages only; `notes` with a required
 // field the loader never fills.
@@ -95,23 +96,16 @@ export async function startDocumentsPayload(opts: { excerpt?: boolean } = {}): P
   const config = buildConfig({
     secret: 'test-secret-not-real',
     telemetry: false,
-    db: sqliteAdapter({ client: { url: `file:${path.join(dir, 'test.db').replace(/\\/g, '/')}` }, push: true }),
+    db: testDatabase(dir),
     editor: lexicalEditor(),
     collections: collections(dir, opts.excerpt === true),
     logger: { options: { level: 'error' } },
   })
   const payload = await getPayload({ config, key: dir })
+  await waitForDatabase(payload)
   return {
     payload,
     dir,
-    async close() {
-      await payload.db.destroy?.()
-      ;(payload.db as { client?: { close?: () => void } }).client?.close?.()
-      try {
-        await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error
-      }
-    },
+    close: () => closeTestPayload(payload, dir),
   }
 }

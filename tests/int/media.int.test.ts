@@ -8,6 +8,7 @@ import { loadMedia } from '../../src/loaders/media.js'
 import type { IdKind, LoaderContext } from '../../src/loaders/types.js'
 import { MemoryReport } from '../../src/report/types.js'
 import { MediaError, SecurityError } from '../../src/security/index.js'
+import { MISSING_ID } from './db.js'
 import { startPayload, type TestPayload } from './harness.js'
 
 const FIXTURES = path.resolve('tests/fixtures/hacked-media')
@@ -139,11 +140,11 @@ describe('loadMedia', () => {
   // Review F1: the state cache survives a wiped database; the database must win.
   it('recreates media when the cached ID points at a document that no longer exists', async () => {
     const { ctx, report, opts, map } = setup()
-    map.set('media:14', 999_999)
+    map.set('media:14', MISSING_ID)
     await loadMedia(ctx, [item(14, 'ok.jpg')], opts)
     expect(report.summary.media).toEqual({ created: 1 })
     expect(report.errors).toEqual([])
-    expect(map.get('media:14')).not.toBe(999_999)
+    expect(map.get('media:14')).not.toBe(MISSING_ID)
   })
 
   // Review F2: a reused item must not rewrite the shared document's alt text on later runs.
