@@ -20,7 +20,7 @@ export interface DoctorOptions {
   // Injected in tests so the source check needs no network.
   createExtractor?: (source: Extract<ResolvedConfig['source'], { type: 'rest' }>) => Pick<RestExtractor, 'probe' | 'rankMathHeadless'>
   createWxrExtractor?: (file: string) => Pick<WxrExtractor, 'probe'>
-  createSqlExtractor?: (file: string, tablePrefix: string) => Pick<SqlExtractor, 'probe'>
+  createSqlExtractor?: (file: string, tablePrefix: string | undefined) => Pick<SqlExtractor, 'probe'>
 }
 
 const defaultExtractor: NonNullable<DoctorOptions['createExtractor']> = (source) =>
@@ -60,9 +60,10 @@ async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' 
   const results: CheckResult[] = []
   try {
     const file = path.resolve(cwd, source.file)
-    const info = await (opts.createSqlExtractor ?? ((f, prefix) => new SqlExtractor({ file: f, tablePrefix: prefix })))(file, source.tablePrefix).probe()
+    const create = opts.createSqlExtractor ?? ((f, prefix) => new SqlExtractor({ file: f, ...(prefix !== undefined ? { tablePrefix: prefix } : {}) }))
+    const info = await create(file, source.tablePrefix).probe()
     const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
-    results.push({ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info))
+    results.push({ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...prefixCheck(info), ...unmigrated(info))
   } catch (error) {
     if (!(error instanceof DumpError)) throw error
     results.push({ status: 'fail', title: error.message })
@@ -87,6 +88,16 @@ async function checkSql(source: Extract<ResolvedConfig['source'], { type: 'sql' 
   return results
 }
 
+/** The table prefix a dump is read with, and where it came from (a backup's prefix need not be wp_). */
+function prefixCheck(info: SourceInfo): CheckResult[] {
+  const p = info.tablePrefix
+  if (!p) return []
+  const where = p.from === 'config' ? 'source.tablePrefix' : p.from === 'wp-config.php' ? "from the backup's wp-config.php" : 'detected from the dump'
+  const title = `Table prefix ${p.value} (${where})`
+  // The note says why wp-config.php was not used: worth a look, since a hacked site's may be altered.
+  return [p.note ? { status: 'warn', title, detail: p.note } : { status: 'ok', title }]
+}
+
 /** A source error as a check: its first line is the title, the rest (next step, code) the detail. */
 function failed(error: Error): CheckResult {
   const [title = error.message, ...rest] = error.message.split('\n')
@@ -100,7 +111,12 @@ async function checkBackup(config: ResolvedConfig, opts: DoctorOptions): Promise
     source = await openSource(config, opts.cwd ?? process.cwd(), { media: false })
     const info = await source.extractor.probe()
     const counts = Object.entries(info.counts).map(([kind, n]) => `${n} ${kind}`).join(', ')
-    const results: CheckResult[] = [{ status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` }, ...unmigrated(info)]
+    const results: CheckResult[] = [
+      { status: 'ok', title: `Backup of ${clean(info.siteUrl)}`, detail: `${counts}\nSEO plugin: ${clean(info.seoPlugin ?? 'none detected')}` },
+      // A .wpress backup always uses its own fixed prefix: nothing to show.
+      ...(config.source.type === 'archive' ? prefixCheck(info) : []),
+      ...unmigrated(info),
+    ]
     if (source.uploadFiles === 0) {
       results.push({ status: 'warn', title: 'The backup has no uploads folder', detail: 'No media will be migrated. Duplicator and hand-made archives keep it in wp-content/uploads.' })
     } else if (source.uploadFiles !== undefined) {

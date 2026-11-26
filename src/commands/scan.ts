@@ -22,6 +22,8 @@ export interface ScanCommandOptions {
   target?: string
   /** SQL dumps given as a target: the uploads folder, or the uploads archives (UpdraftPlus). */
   uploads?: string | string[]
+  /** SQL dumps and zip/tar backups given as a target: the table prefix, when detection cannot choose. */
+  tablePrefix?: string
   media?: boolean
   limit?: number
   concurrency?: number
@@ -108,8 +110,16 @@ export async function runScanCommand(opts: ScanCommandOptions = {}): Promise<num
         media = false
         log(formatLine('warn', 'No uploads folder next to the dump: media is not checked', 'Pass --uploads <dir> to check it.'))
       }
+      if (opts.tablePrefix !== undefined) {
+        if (t.source['type'] !== 'sql' && t.source['type'] !== 'archive') throw new ConfigError('--table-prefix is for a SQL dump or a .zip/.tar.gz backup.')
+        t.source['tablePrefix'] = opts.tablePrefix
+      }
       config = resolveConfig({ source: t.source }, env)
     } else {
+      if (opts.tablePrefix !== undefined) {
+        log(formatLine('fail', '--table-prefix needs a target', 'Pass the dump or backup to scan, or set source.tablePrefix in wp2payload.config.ts.'))
+        return 2
+      }
       const file = opts.configPath ?? DEFAULT_CONFIG_FILE
       if (!opts.configPath && !existsSync(path.resolve(cwd, file))) {
         log(formatLine('fail', `No ${DEFAULT_CONFIG_FILE} found`, 'Pass what to scan: wp2payload scan https://example.com (or an export file or backup).'))

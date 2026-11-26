@@ -124,3 +124,5 @@ Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of 
 | `REST_NETWORK`, `REST_DNS_FAILED`, `REST_TIMEOUT` | The site could not be reached |
 | `REST_BAD_URL`, `REST_HTTP_NOT_ALLOWED` | The source URL is invalid, or plain http to a public host |
 | `REST_BAD_REDIRECT`, `REST_CROSS_ORIGIN`, `REST_TOO_MANY_REDIRECTS` | Redirects that leave the site or loop |
+| `DUMP_NO_WORDPRESS` | SQL and backup sources: the dump has no WordPress tables, none with the configured `source.tablePrefix` (the message names the prefix it found), or no complete install (a prefix needs `posts`, `postmeta` and `options` tables) |
+| `DUMP_MULTIPLE_SITES` | SQL and backup sources without `source.tablePrefix`: the dump holds more than one WordPress site (a multisite, or several installs in one database), and the backup's `wp-config.php` did not name one of them. The message lists the prefixes; set `source.tablePrefix` (`scan`: `--table-prefix`) to the one to migrate. Like the archive codes, it stops `migrate`, `scan` and `doctor` before anything is read into Payload |

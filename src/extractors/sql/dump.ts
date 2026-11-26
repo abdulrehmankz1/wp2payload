@@ -43,11 +43,16 @@ export interface DumpInput {
   open(): Promise<Readable>
 }
 
+/** Which tables to read rows of: a set of names, or any object that answers by name. */
+export interface TableFilter {
+  has(table: string): boolean
+}
+
 /** `tables`: the table names to read rows of; `CREATE TABLE` columns are reported for every table. */
 /** `range`: the dump is a slice of a larger file (a .wpress backup), from `start` for `length` bytes. */
 export async function* readDump(
   file: string | DumpInput,
-  opts: { tables: ReadonlySet<string>; maxBytes?: number; range?: { start: number; length: number } },
+  opts: { tables: TableFilter; maxBytes?: number; range?: { start: number; length: number } },
 ): AsyncIterable<DumpEvent> {
   const max = opts.maxBytes ?? MAX_DUMP_BYTES
   const { raw, gz } = typeof file === 'string' ? await openFile(file, max, opts.range) : await openInput(file, max)
@@ -141,7 +146,7 @@ type Mode = 'head' | 'skip' | 'values'
 
 /** Character-level state machine; state survives chunk boundaries. */
 export class DumpParser {
-  readonly #tables: ReadonlySet<string>
+  readonly #tables: TableFilter
   readonly #columns = new Map<string, string[]>()
   /** Tables already reported with a table event. */
   readonly #seen = new Set<string>()
@@ -166,7 +171,7 @@ export class DumpParser {
   #pendingQuote = false
   #wanted = false
 
-  constructor(tables: ReadonlySet<string>) {
+  constructor(tables: TableFilter) {
     this.#tables = tables
   }
 

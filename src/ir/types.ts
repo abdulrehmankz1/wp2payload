@@ -67,6 +67,15 @@ export interface SourceInfo {
   seoPlugin?: 'yoast' | 'rankmath'
   /** Content types the source has but does not migrate (e.g. WooCommerce products), with counts. */
   unmigratedTypes?: { type: string; count: number }[]
+  /** SQL and backup sources: the table prefix read, and where it came from. */
+  tablePrefix?: TablePrefixInfo
+}
+
+export interface TablePrefixInfo {
+  value: string
+  from: 'config' | 'wp-config.php' | 'dump'
+  /** Why wp-config.php was not used, when the backup had one. */
+  note?: string
 }
 
 export interface Extractor {

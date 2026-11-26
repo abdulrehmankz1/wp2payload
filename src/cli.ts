@@ -114,6 +114,7 @@ program
   .description('Security and content health report of a site, without migrating. Needs no Payload project')
   .option('--config <path>', 'config file location (default: wp2payload.config.ts)')
   .option('--uploads <path>', 'for a SQL dump: the uploads folder (default: uploads next to the dump), or an uploads archive (repeatable)', (value: string, prev: string[] = []) => [...prev, value])
+  .option('--table-prefix <prefix>', 'for a SQL dump or backup: the WordPress table prefix (default: detected)')
   .option('--no-media', 'do not download or check media files')
   .option('--limit <n>', 'scan only the first n documents', positiveInt('--limit'))
   .option('--concurrency <n>', 'parallel media checks (default 4)', positiveInt('--concurrency'))
@@ -130,6 +131,7 @@ program
       // A file target is given relative to where the user typed it.
       ...(target ? { target: /^https?:\/\//i.test(target) ? target : path.resolve(here, target) } : {}),
       ...(opts.uploads?.length ? { uploads: opts.uploads.map((u) => path.resolve(here, u)) } : {}),
+      ...(opts.tablePrefix !== undefined ? { tablePrefix: opts.tablePrefix } : {}),
       media: opts.media !== false,
       ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
       ...(opts.concurrency !== undefined ? { concurrency: opts.concurrency } : {}),
@@ -145,6 +147,7 @@ program
 interface ScanCliOptions {
   config?: string
   uploads?: string[]
+  tablePrefix?: string
   media?: boolean
   limit?: number
   concurrency?: number

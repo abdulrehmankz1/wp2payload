@@ -5,6 +5,7 @@ import path from 'node:path'
 import { MediaError, SecurityError } from '../../security/errors.js'
 import { readLocalMedia } from '../../security/media/local.js'
 import { DumpError, type DumpInput } from '../sql/dump.js'
+import { MAX_WP_CONFIG_BYTES, pickWpConfig, wpConfigRank } from '../sql/prefix.js'
 import {
   ArchiveError,
   DEFAULT_ARCHIVE_LIMITS,
@@ -33,6 +34,8 @@ export { ArchiveError, DEFAULT_ARCHIVE_LIMITS, type ArchiveCode, type ArchiveLim
 // else: no themes, plugins or PHP) are extracted once into a private temp folder that is removed
 // when the source closes, when the process exits, on Ctrl+C or Ctrl+Break, and when the terminal
 // closes. Only dump candidates that can still be picked are kept, under the dump size cap.
+// The one other file read is the site's wp-config.php, into memory under 256 KB, as text: only its
+// $table_prefix is taken (sql/prefix.ts), and it is never executed or written to disk.
 
 export interface OpenArchiveOptions {
   /** Look for the SQL dump inside (false for uploads-only archives). */
@@ -49,6 +52,11 @@ export interface OpenArchiveOptions {
 export interface OpenedArchive {
   /** The dump, read in place (zip) or extracted (tar); undefined when not asked for. */
   database?: string | DumpInput
+  /**
+   * With `database`: the site's wp-config.php as text, for its `$table_prefix` only. Never executed.
+   * Undefined when there is none, when several candidates tie, or when it is too large or unreadable.
+   */
+  wpConfig?: string
   /** Files under the uploads folder. */
   uploads: number
   /** A media file by `_wp_attached_file` path; undefined for a tar opened without media. */
@@ -130,9 +138,11 @@ async function openZip(file: string, o: OpenArchiveOptions, limits: ArchiveLimit
       database = { name: dbRel, size: e.uncompressedSize, open: () => openZipEntry(ix, e) }
     }
     for (const [rel, e] of uploads) check(`${prefix}${rel}`, e)
+    const wpConfig = o.database ? await zipWpConfig(ix) : undefined
 
     return {
       ...(database ? { database } : {}),
+      ...(wpConfig !== undefined ? { wpConfig } : {}),
       uploads: uploads.size,
       readMedia: async (relPath, maxBytes) => {
         const rel = mediaPath(relPath)
@@ -145,6 +155,35 @@ async function openZip(file: string, o: OpenArchiveOptions, limits: ArchiveLimit
   } catch (error) {
     ix.zip.close()
     throw error
+  }
+}
+
+/** The zip's wp-config.php as text: small, read into memory under its own cap, never unpacked to disk. */
+async function zipWpConfig(ix: Awaited<ReturnType<typeof indexZip>>): Promise<string | undefined> {
+  const rel = pickWpConfig((function* () {
+    for (const r of ix.files.keys()) if (!uploadsPart(r)) yield r
+  })())
+  const e = rel === undefined ? undefined : ix.files.get(rel)
+  if (rel === undefined || e === undefined || e.uncompressedSize > MAX_WP_CONFIG_BYTES) return undefined
+  try {
+    checkReadable(ix, rel, e)
+    return (await readZipEntry(ix, rel, e, MAX_WP_CONFIG_BYTES)).toString('utf8')
+  } catch {
+    // Encrypted, damaged or oversized: the dump's tables decide the prefix instead.
+    return undefined
+  }
+}
+
+/** Keeps a small file of a tar in memory (wp-config.php), up to `max` bytes; more drops it. */
+function memorySink(max: number, done: (data: Buffer | undefined) => void): TarSink {
+  const chunks: Buffer[] = []
+  let n = 0
+  return {
+    write: async (chunk) => {
+      n += chunk.length
+      if (n <= max) chunks.push(Buffer.from(chunk))
+    },
+    close: async () => done(n <= max ? Buffer.concat(chunks) : undefined),
   }
 }
 
@@ -163,7 +202,24 @@ async function openTar(file: string, gzip: boolean, o: OpenArchiveOptions, limit
     const dumps = new Map<string, { rank: number; size: number }>()
     let bestRank = Infinity
     let dumpBytes = 0
+    // wp-config.php candidates: every name (for the pick), the content only of the best-ranked few.
+    const configNames: string[] = []
+    const configs = new Map<string, Buffer | undefined>()
+    let configRank = Infinity
     await readTar(file, gzip, limits, async (rel, size) => {
+      const rank = o.database && !uploadsPart(rel) ? wpConfigRank(rel) : undefined
+      if (rank !== undefined) {
+        configNames.push(rel)
+        if (rank < configRank) {
+          configRank = rank
+          configs.clear()
+        }
+        if (rank === configRank && size <= MAX_WP_CONFIG_BYTES && !configs.has(rel) && configs.size < 8) {
+          configs.set(rel, undefined)
+          return memorySink(MAX_WP_CONFIG_BYTES, (data) => configs.has(rel) && configs.set(rel, data))
+        }
+        return undefined
+      }
       let keepUpload = false
       const u = uploadsPart(rel)
       if (u) {
@@ -206,8 +262,11 @@ async function openTar(file: string, gzip: boolean, o: OpenArchiveOptions, limit
     const uploadsDir = prefix ? insideRoot(file, root, prefix.slice(0, -1)) : undefined
 
     const close = () => removeRoot(root)
+    const configRel = pickWpConfig(configNames)
+    const wpConfig = configRel === undefined ? undefined : configs.get(configRel)?.toString('utf8')
     return {
       ...(dbRel !== undefined ? { database: insideRoot(file, root, dbRel) } : {}),
+      ...(wpConfig !== undefined ? { wpConfig } : {}),
       uploads: uploadFiles.size,
       ...(o.media
         ? {
