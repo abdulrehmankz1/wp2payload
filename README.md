@@ -341,8 +341,11 @@ Accounts are never created by default. Without `authors.createAccounts`, mapping
 auth collection stops `migrate` (and `doctor`) with exit code 2 before anything is written, and
 `--invite-users` is a usage error (exit 2). It is a config key rather than a flag so it holds for
 every run of the project (resumes, `--since` syncs, the first-run preview) and `doctor` can check
-it. A run with it on records it in the report: `optIns` in `report.json`, an `opt-in` line in the
-summary and "Safety defaults loosened" in `security-report.html`. With it, wp2payload:
+it. To see which collections have `auth`, `doctor` evaluates your `payload.config.ts` whenever
+authors are mapped; it never connects to the database or runs `onInit`. Only authors may map into
+an auth collection: posts, pages, terms or media mapped into one fail the check before anything is
+written. A run with it on records it in the report: `optIns` in `report.json`, an `opt-in` line
+in the summary and "Safety defaults loosened" in `security-report.html`. With it, wp2payload:
 
 - creates each user with their WordPress email and a random 32-byte password that is never shown,
   logged or saved anywhere (WordPress password hashes cannot be reused);
