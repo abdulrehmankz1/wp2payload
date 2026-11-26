@@ -52,12 +52,13 @@ Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of 
 
 | Code | Severity | Action | Meaning |
 | --- | --- | --- | --- |
-| `SEC_ARCHIVE_PATH_TRAVERSAL` | high | refused | An entry name that leaves the archive folder: `..`, an absolute path, a drive letter or a colon, a NUL character, the same tricks with backslashes, or (tar, where files are unpacked) a name Windows reserves for devices |
+| `SEC_ARCHIVE_PATH_TRAVERSAL` | high | refused | An entry name that leaves the archive folder: `..`, an absolute path, a drive letter or a colon, a NUL character, the same tricks with backslashes, or (tar, where files are unpacked) a name Windows reserves or trims in any folder of the path: `CON`, `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9` (superscript ¹²³ too), `CONIN$`, `CONOUT$`, with any extension and spaces before the dot (`con .sql`), or a name ending in a dot or space |
 | `SEC_ARCHIVE_LINK` | high | refused | A symbolic or hard link entry |
 | `SEC_ARCHIVE_SPECIAL_FILE` | high | refused | A device, FIFO, socket, sparse or other entry that is not a regular file or folder |
-| `SEC_ARCHIVE_TOO_LARGE` | high | refused | The dump and uploads of a zip, or a whole tar, unpack to more than 64 GB |
+| `SEC_ARCHIVE_TOO_LARGE` | high | refused | The dump and uploads of a zip, or a whole tar, unpack to more than 64 GB; or (tar) the `.sql`/`.sql.gz` files that could be the dump, kept on disk together while it is unpacked, pass the 8 GB dump cap. Only candidates that can still be picked are kept, so a backup with one dump never hits this |
 | `SEC_ARCHIVE_TOO_MANY_FILES` | high | refused | More than 1,000,000 entries |
 | `SEC_ARCHIVE_RATIO` | high | refused | A zip entry over 1 MB that unpacks to more than 100 times its packed size, or a tar.gz stream that does (zip bomb) |
+| `SEC_ARCHIVE_OVERLAP` | high | refused | Two zip entries whose data overlap, so the same packed bytes would be unpacked several times (overlap zip bomb). Zip tools never write this |
 
 ## Warnings
 
