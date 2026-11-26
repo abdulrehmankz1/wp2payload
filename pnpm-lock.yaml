@@ -165,6 +165,7 @@ settings:
 overrides:
   dompurify: '>=3.4.17'
   happy-dom: '>=21.0.4'
+  mongoose: ^8.24.7
   next: '>=16.4.5'
 
 importers:
@@ -2805,14 +2806,14 @@ packages:
     resolution: {integrity: sha512-8chOqpVE3bcoWT2pIgcJeIZlXaOfQCavZgQZF4qytUtjRBqsNMyzUoR16qdw9XL2kC478N8iA8z0AA+NSS0d1A==}
     engines: {node: '>=16.20.1'}
     peerDependencies:
-      mongoose: '>=5.11.10'
+      mongoose: ^8.24.7
 
   mongoose-paginate-v2@1.9.4:
     resolution: {integrity: sha512-0LOsVEQmjrbJKVDi/IvFEhIezmuRjUE4loGgslv57j9nK/NMC+mbKT0QnaPSPpib4lByKVBcy3VbDa1TvlHZjA==}
     engines: {node: '>=4.0.0'}
 
-  mongoose@8.24.1:
-    resolution: {integrity: sha512-UpHBA0l5kHyKJQFjmBaFYQFo5sgz1DK0TRqDkOyBLYbqiIbKKhIvBpHWBXqeo0rgW4kGI1UhhAw+kTQZoj1BdA==}
+  mongoose@8.24.11:
+    resolution: {integrity: sha512-/+sMN5nKCijI2QaIHikCu8z0LIAqH5ecWGC+gZDqXLNLAnqa0FG+7VOYMbS04QOdZWvAQVQXY71uvCVmtjhppA==}
     engines: {node: '>=16.20.1'}
 
   mpath@0.8.4:
@@ -2823,8 +2824,8 @@ packages:
     resolution: {integrity: sha512-ikJRQTk8hw5DEoFVxHG1Gn9T/xcjtdnOKIU1JTmGjZZlg9LST2mBLmcX3/ICIbgJydT2GOc15RnNy5mHmzfSew==}
     engines: {node: '>=4.0.0'}
 
-  mquery@5.0.0:
-    resolution: {integrity: sha512-iQMncpmEK8R8ncT8HJGsGc9Dsp8xcgYMVSbs5jgnm1lFHTZqMJTUWTDx1LBO8+mK3tPNZWFLBghQEIOULSTHZg==}
+  mquery@5.0.1:
+    resolution: {integrity: sha512-C99lWV0TFI34pS008jBsi3JrE2xZPnTgUw5yApQR71nRP0hxLy8D5m1Lbbk83c8AQWJwdJ0329HzFtZ1MRTUIw==}
     engines: {node: '>=14.0.0'}
 
   ms@2.1.3:
@@ -4451,8 +4452,8 @@ snapshots:
 
   '@payloadcms/db-mongodb@3.93.0(payload@3.93.0(graphql@16.15.0)(typescript@7.0.2))':
     dependencies:
-      mongoose: 8.24.1
-      mongoose-paginate-v2: 1.9.4(mongoose@8.24.1)
+      mongoose: 8.24.11
+      mongoose-paginate-v2: 1.9.4(mongoose@8.24.11)
       payload: 3.93.0(graphql@16.15.0)(typescript@7.0.2)
       prompts: 2.4.2
       uuid: 13.0.2
@@ -5885,24 +5886,24 @@ snapshots:
       bson: 6.10.4
       mongodb-connection-string-url: 3.0.2
 
-  mongoose-lean-virtuals@1.1.1(mongoose@8.24.1):
+  mongoose-lean-virtuals@1.1.1(mongoose@8.24.11):
     dependencies:
-      mongoose: 8.24.1
+      mongoose: 8.24.11
       mpath: 0.8.4
 
-  mongoose-paginate-v2@1.9.4(mongoose@8.24.1):
+  mongoose-paginate-v2@1.9.4(mongoose@8.24.11):
     dependencies:
-      mongoose-lean-virtuals: 1.1.1(mongoose@8.24.1)
+      mongoose-lean-virtuals: 1.1.1(mongoose@8.24.11)
     transitivePeerDependencies:
       - mongoose
 
-  mongoose@8.24.1:
+  mongoose@8.24.11:
     dependencies:
       bson: 6.10.4
       kareem: 2.6.3
       mongodb: 6.20.0
       mpath: 0.9.0
-      mquery: 5.0.0
+      mquery: 5.0.1
       ms: 2.1.3
       sift: 17.1.3
     transitivePeerDependencies:
@@ -5919,7 +5920,7 @@ snapshots:
 
   mpath@0.9.0: {}
 
-  mquery@5.0.0:
+  mquery@5.0.1:
     dependencies:
       debug: 4.4.3
     transitivePeerDependencies:
