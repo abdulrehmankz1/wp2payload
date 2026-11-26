@@ -214,8 +214,9 @@ command ends, also on an error or Ctrl+C.
 Every entry is checked before anything is read, and a hostile archive is refused as a whole
 with a `SEC_ARCHIVE_*` code ([codes](docs/reference/codes.md#backup-archives)): names that
 leave the archive (`..`, absolute paths, drive letters, backslash tricks), symbolic and hard
-links, and device files. Zip bombs are capped at 1,000,000 entries, 64 GB unpacked, and a
-compression ratio of 100:1 for anything over 1 MB.
+links, device files, Windows device names (`con`, `nul .jpg`), and zip entries whose data
+overlaps. Zip bombs are capped at 1,000,000 entries, 64 GB unpacked, and a compression ratio
+of 100:1 for anything over 1 MB; the database dump is capped at 8 GB.
 
 ### Using your existing collections
 
