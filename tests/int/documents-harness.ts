@@ -7,10 +7,10 @@ import { wpMetaField } from '../../src/loaders/wpmeta.js'
 import { waitForDatabase } from '../../src/payload/ready.js'
 import { closeTestPayload, testDatabase } from './db.js'
 
-// Real Payload (SQLite or MongoDB, see db.ts) shaped like the blog preset (doc 4.7): posts with drafts, an SEO `meta`
-// group, a `heroImage` upload and a Lexical editor with the embed/wpRawHtml blocks; pages with a
-// `parent` and a plain editor; `briefs` whose links reach pages only; `notes` with a required
-// field the loader never fills.
+// Real Payload (SQLite or MongoDB, see db.ts) shaped like the blog preset (doc 4.7): posts with
+// drafts, an SEO `meta` group, a `heroImage` upload and a Lexical editor with the embed/wpRawHtml
+// blocks; pages with a `parent` and a plain editor; `briefs` whose links reach pages only;
+// `notes` with a required field the loader never fills.
 
 const blocks = BlocksFeature({
   blocks: [

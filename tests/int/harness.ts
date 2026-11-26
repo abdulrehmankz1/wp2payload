@@ -6,7 +6,8 @@ import { wpMetaField } from '../../src/loaders/wpmeta.js'
 import { waitForDatabase } from '../../src/payload/ready.js'
 import { closeTestPayload, testDatabase } from './db.js'
 
-// Real Payload on a throwaway database, SQLite or MongoDB per WP2P_TEST_DB (doc 2.11: loaders run against a real instance).
+// Real Payload on a throwaway database, SQLite or MongoDB per WP2P_TEST_DB (see db.ts; doc 2.11:
+// loaders run against a real instance).
 // Collections mirror the blog preset (doc 4.7) closely enough for loader tests.
 const collections: CollectionConfig[] = [
   {
