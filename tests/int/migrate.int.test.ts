@@ -137,6 +137,73 @@ describe('runPipeline', () => {
     expect(fresh.summary['documents']).toEqual({ updated: 3 })
   })
 
+  it('a re-run after a hard crash mid-documents reaches the same final state as a clean run (doc 2.11)', async () => {
+    const shape = (origin: string) => [
+      doc(origin, 100, 'post'),
+      doc(origin, 101, 'post', { authorWpId: undefined, termWpIds: [11] }),
+      doc(origin, 102, 'post'),
+      doc(origin, 200, 'page'),
+      doc(origin, 201, 'page', { parentWpId: 200 }),
+      doc(origin, 202, 'page', { parentWpId: 201 }),
+    ]
+    // Payload that stops answering after two document creates: the process "dies" there, with no
+    // chance to flush state or finish the relationship pass. The abandoned run never settles.
+    let creates = 0
+    const crashing = new Proxy(t.payload, {
+      get(target, key, receiver) {
+        if (key === 'create') {
+          return (args: { collection: string }) => {
+            if ((args.collection === 'posts' || args.collection === 'pages') && ++creates > 2) return new Promise(() => {})
+            return target.create(args as never)
+          }
+        }
+        const value = Reflect.get(target, key, receiver) as unknown
+        return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value
+      },
+    })
+
+    const crashed = setup('https://crash.test', shape('https://crash.test'))
+    void crashed.run({ payload: crashing as never })
+    for (let i = 0; i < 400 && creates <= 2; i++) await new Promise((r) => setTimeout(r, 25))
+    expect(creates).toBe(3)
+    expect(await count('posts', crashed.site)).toBe(2)
+
+    const resumed = await crashed.run()
+    expect(resumed.stopped).toBeUndefined()
+    expect(resumed.errors).toEqual([])
+    expect(resumed.summary['documents']).toEqual({ created: 4, updated: 2 })
+
+    const clean = setup('https://clean.test', shape('https://clean.test'))
+    expect((await clean.run()).errors).toEqual([])
+
+    // Compare by WordPress IDs, since Payload IDs differ between the two sites.
+    const wpIdOf = (v: unknown) => (v && typeof v === 'object' ? (v as { wpMeta?: { wpId?: number } }).wpMeta?.wpId : undefined)
+    const snapshot = async (site: string) => {
+      const out: Record<string, unknown>[] = []
+      for (const collection of ['posts', 'pages'] as const) {
+        const { docs } = await t.payload.find({ collection, where: { 'wpMeta.site': { equals: site } }, depth: 1, limit: 100, sort: 'wpMeta.wpId', overrideAccess: true })
+        for (const d of docs as Record<string, unknown>[]) {
+          out.push({
+            collection,
+            wpId: wpIdOf(d),
+            title: d['title'],
+            slug: d['slug'],
+            content: JSON.stringify(d['content']),
+            author: wpIdOf(d['author']),
+            categories: ((d['categories'] as unknown[]) ?? []).map(wpIdOf),
+            tags: ((d['tags'] as unknown[]) ?? []).map(wpIdOf),
+            parent: wpIdOf(d['parent']),
+          })
+        }
+      }
+      return out
+    }
+    const after = await snapshot(crashed.site)
+    expect(after).toHaveLength(6)
+    expect(after).toEqual(await snapshot(clean.site))
+    expect(after.find((d) => d['wpId'] === 202)?.['parent']).toBe(201)
+  })
+
   it('drops a cached ID map when the database has nothing from the site (wiped or switched)', async () => {
     const origin = 'https://stale.test'
     const { site, run } = setup(origin, [doc(origin, 100, 'post')])
