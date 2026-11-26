@@ -44,9 +44,9 @@ export async function runReport(opts: ReportOptions = {}): Promise<number> {
   }
   if (opts.html) {
     const target = path.resolve(cwd, typeof opts.html === 'string' ? opts.html : SECURITY_HTML_PATH)
-    // The export must never replace the data it was made from.
-    if (target === path.resolve(cwd, REPORT_PATH) || path.extname(target).toLowerCase() === '.json') {
-      log(formatLine('fail', `Will not write HTML to ${path.basename(target)}`, 'Pass a path ending in .html, or no path for .wp2payload/security-report.html.', color))
+    // Only .html or .htm: a typo such as `--html payload.config.ts` must not overwrite source or report.json.
+    if (!['.html', '.htm'].includes(path.extname(target).toLowerCase())) {
+      log(formatLine('fail', `Will not write HTML to ${path.basename(target)}`, 'Pass a path ending in .html or .htm, or no path for .wp2payload/security-report.html.', color))
       return 2
     }
     await writeAtomic(target, renderSecurityReportHtml(report, opts.version ? { version: opts.version } : {}))

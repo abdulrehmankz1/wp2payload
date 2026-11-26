@@ -304,6 +304,23 @@ describe('runReport --html', () => {
     expect(existsSync(path.join(dir, 'x.JSON'))).toBe(false)
   })
 
+  it('writes only to .html or .htm, so a typo cannot overwrite source code', async () => {
+    await writeReport(dir, sample())
+    await writeFile(path.join(dir, 'payload.config.ts'), 'export default {}\n', 'utf8')
+    for (const target of ['payload.config.ts', 'notes.txt', 'report', 'report.html.ts', '.wp2payload/security-report.html.bak']) {
+      const { code, lines } = await run({ html: target })
+      expect(code, target).toBe(2)
+      expect(lines[0]).toMatch(/Will not write HTML/)
+      expect(lines.join('\n')).toContain('.html or .htm')
+    }
+    expect(await readFile(path.join(dir, 'payload.config.ts'), 'utf8')).toBe('export default {}\n')
+    for (const f of ['notes.txt', 'report', 'report.html.ts']) expect(existsSync(path.join(dir, f))).toBe(false)
+    for (const target of ['a.htm', 'b.HTML']) {
+      expect((await run({ html: target })).code).toBe(0)
+      expect(problems(await readFile(path.join(dir, target), 'utf8'))).toEqual([])
+    }
+  })
+
   it('refuses --json together with --html, and needs a report', async () => {
     expect((await run({ html: true, json: true })).code).toBe(2)
     const none = await run({ html: true })
