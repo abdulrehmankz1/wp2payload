@@ -7,6 +7,7 @@ import type { Payload, SanitizedConfig } from 'payload'
 import type { Env } from '../config/types.js'
 import { SUPPORTED_PAYLOAD_MAJOR } from '../doctor/checks.js'
 import { PayloadBootError } from './errors.js'
+import { waitForDatabase } from './ready.js'
 
 // Boots the USER's Payload, never wp2payload's own dev copy (spec 05 Decisions). Everything
 // Payload-side is resolved from the project folder so the process holds exactly one Payload
@@ -275,6 +276,7 @@ export async function bootPayload(opts: BootOptions): Promise<BootedPayload> {
       getPayload(options: { config: SanitizedConfig; key?: string }): Promise<Payload>
     }
     payload = await payloadModule.getPayload({ config, key: configPath })
+    await waitForDatabase(payload)
   } catch (error) {
     await unregister?.().catch(() => undefined)
     throw bootFailed(configPath, error)
