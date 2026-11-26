@@ -97,6 +97,7 @@ Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of 
 | `TERM_PARENT_MISSING` | A category's parent was not found; imported without a parent |
 | `TERM_PARENT_CYCLE` | Categories whose parents form a loop; imported without parents |
 | `TERM_TAXONOMY_UNSUPPORTED` | A taxonomy other than categories and tags |
+| `DUMP_OTHER_SITES` | Archive backups without `source.tablePrefix`: the dump holds several WordPress sites and the backup's `wp-config.php` named one, so that one was read. Lists the other prefixes, once per run (`doctor` shows it as a warning), so a planted `wp-config.php` cannot pick a site unnoticed. Set `source.tablePrefix` to choose another |
 | `AUTHOR_NOT_MIGRATED` | A user with no migrated content, left out on purpose (doc 12.9) |
 | `AUTHOR_NO_EMAIL` | Authors mapped into an auth collection: the user has no email in the source, so no account was created. Only the REST source with an Application Password that can list users reads emails |
 | `AUTHOR_EMAIL_IN_USE` | Authors mapped into an auth collection: an account that wp2payload did not create already has the user's email. It is never linked or changed; the user's content is written without an author |
@@ -126,6 +127,7 @@ Zip and tar backups (`source.type: 'archive'`, and `source.uploads` archives of 
 | `REST_BAD_REDIRECT`, `REST_CROSS_ORIGIN`, `REST_TOO_MANY_REDIRECTS` | Redirects that leave the site or loop |
 | `DUMP_NO_WORDPRESS` | SQL and backup sources: the dump has no WordPress tables, none with the configured `source.tablePrefix` (the message names the prefix it found), or no complete install (a prefix needs `posts`, `postmeta` and `options` tables) |
 | `DUMP_MULTIPLE_SITES` | SQL and backup sources without `source.tablePrefix`: the dump holds more than one WordPress site (a multisite, or several installs in one database), and the backup's `wp-config.php` did not name one of them. The message lists the prefixes; set `source.tablePrefix` (`scan`: `--table-prefix`) to the one to migrate. Like the archive codes, it stops `migrate`, `scan` and `doctor` before anything is read into Payload |
+| `DUMP_TOO_MANY_PREFIXES` | SQL and backup sources without `source.tablePrefix`: the dump names WordPress tables (`<prefix>posts`, `<prefix>terms`...) under more than 1,000 different prefixes. Real backups have a few; a hostile dump can name millions to exhaust time and memory, so reading stops there. Stops `migrate`, `scan` and `doctor`. With `source.tablePrefix` set, the extra names are skipped instead |
 
 ## Opt-ins
 

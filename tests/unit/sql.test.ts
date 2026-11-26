@@ -207,11 +207,40 @@ describe('table prefix detection', () => {
     const f = await file(as('wp_') + as('abc_', 'https://other.example'))
     const ex = new SqlExtractor({ file: f, wpConfig: { status: 'found', prefix: 'abc_' } })
     const info = await ex.probe()
-    expect(info.tablePrefix).toEqual({ value: 'abc_', from: 'wp-config.php' })
+    expect(info.tablePrefix).toMatchObject({ value: 'abc_', from: 'wp-config.php' })
     expect(info.siteUrl).toBe('https://other.example')
     // An explicit tablePrefix always wins.
     const explicit = await new SqlExtractor({ file: f, tablePrefix: 'wp_', wpConfig: { status: 'found', prefix: 'abc_' } }).probe()
     expect(explicit.tablePrefix).toEqual({ value: 'wp_', from: 'config' })
+  })
+
+  it('names the other installs when wp-config.php picks one, in the probe and as DUMP_OTHER_SITES (SEC-P3)', async () => {
+    const f = await file(as('wp_') + as('abc_', 'https://other.example'))
+    const warnings: { code: string; detail: string }[] = []
+    const ex = new SqlExtractor({ file: f, wpConfig: { status: 'found', prefix: 'abc_' }, onWarning: (w) => warnings.push(w) })
+    expect((await ex.probe()).tablePrefix).toEqual({
+      value: 'abc_',
+      from: 'wp-config.php',
+      note: 'The dump also holds other WordPress sites, with the table prefixes "wp_"; the one wp-config.php names was read. Set source.tablePrefix to choose another.',
+    })
+    await collect(ex.documents())
+    expect(warnings.filter((w) => w.code === 'DUMP_OTHER_SITES')).toHaveLength(1)
+    // One install only: nothing to say.
+    const single = await new SqlExtractor({ file: await file(as('abc_')), wpConfig: { status: 'found', prefix: 'abc_' } }).probe()
+    expect(single.tablePrefix).toEqual({ value: 'abc_', from: 'wp-config.php' })
+  })
+
+  it('refuses a dump naming tables with tens of thousands of prefixes, quickly (SEC-P1)', async () => {
+    const hostile = Array.from({ length: 50_000 }, (_, i) => `INSERT INTO \`a${i}_terms\` VALUES (1);\nCREATE TABLE \`b${i}_options\` (\n  \`x\` int\n);\n`).join('')
+    const f = await file(hostile)
+    const t = performance.now()
+    const error = await new SqlExtractor({ file: f }).probe().catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'DUMP_TOO_MANY_PREFIXES' })
+    expect((error as Error).message).toMatch(/over 1000 different prefixes/)
+    // With the prefix configured, the same names are skipped and the real site is still read.
+    const withSite = await file(hostile + DUMP)
+    expect((await new SqlExtractor({ file: withSite, tablePrefix: 'wp_' }).probe()).siteUrl).toBe('https://old.example')
+    expect(performance.now() - t).toBeLessThan(5000)
   })
 
   it('falls back to the dump, with a note, when wp-config.php names absent tables or is invalid', async () => {

@@ -134,8 +134,18 @@ describe('table prefix from the backup (wp-config.php, else the dump)', () => {
   it("reads $table_prefix from a zip's wp-config.php as text, and an explicit tablePrefix wins", async () => {
     const both = WP_DUMP + abc.replaceAll('https://old.example', 'https://other.example')
     const f = await zip([{ name: 'site/wp-config.php', data: config("'abc_'") }, { name: 'site/database.sql', data: both }])
-    expect(await prefixOf(f)).toEqual({ value: 'abc_', from: 'wp-config.php' })
+    // The other install in the dump is named (SEC-P3); doctor shows it as a warning.
+    expect(await prefixOf(f)).toMatchObject({ value: 'abc_', from: 'wp-config.php', note: expect.stringMatching(/other WordPress sites, with the table prefixes "wp_"/) })
     expect(await prefixOf(f, 'wp_')).toEqual({ value: 'wp_', from: 'config' })
+    const cwd = await mkdtemp(path.join(dir, 'doctor-others-'))
+    await writeFile(path.join(cwd, 'wp2payload.config.ts'), `export default { source: { type: 'archive', file: ${JSON.stringify(f)} } }`)
+    const out: string[] = []
+    await runDoctor({ cwd, log: (l) => out.push(l), env: { NO_COLOR: '1' } })
+    expect(out.join('\n')).toMatch(/! Table prefix abc_ \(from the backup's wp-config\.php\)\n\s+The dump also holds other WordPress sites/)
+    // scan (like migrate) reports it as a warning.
+    expect(await runScanCommand({ cwd, target: f, media: false, log: () => {}, env: {} })).toBe(0)
+    const scan = JSON.parse(await readFile(path.join(cwd, '.wp2payload', 'scan.json'), 'utf8')) as ScanReport
+    expect(scan.warnings.map((w) => w.code)).toContain('DUMP_OTHER_SITES')
   })
 
   it("reads Duplicator's wp-config copy and a tar.gz's wp-config.php, without unpacking either", async () => {

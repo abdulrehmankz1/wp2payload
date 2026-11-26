@@ -30,6 +30,17 @@ describe('preflight', () => {
     ])
   })
 
+  it('fails content mapped into an auth collection; authors may map into one (SEC-A1)', () => {
+    // An upload collection too, so media gets past the upload check to the auth one.
+    const payload = fakePayload({ users: { fields: [wpMetaField as FakeField], upload: { staticDir: 'u' }, auth: true } as never })
+    for (const kind of ['post', 'page', 'category', 'post_tag', 'media']) {
+      const [result] = preflight(payload, config({ [kind]: { to: 'users' } }))
+      expect(result, kind).toMatchObject({ status: 'fail', title: `Collection users (WordPress ${kind}) is an auth collection` })
+      expect(result!.detail).toContain(`collections.${kind}.to`)
+    }
+    expect(preflight(payload, config({ author: { to: 'users' } }))).toEqual([{ status: 'ok', title: 'Collection users (WordPress author)' }])
+  })
+
   it('fails a missing collection with both fixes', () => {
     const [result] = preflight(fakePayload({}), config({ post_tag: { to: 'tags' } }))
     expect(result).toMatchObject({ status: 'fail', title: 'Collection tags (WordPress post_tag) does not exist in Payload' })

@@ -53,7 +53,7 @@ function wpMetaProblem(fields: readonly FieldLike[]): string | undefined {
 
 export function preflight(payload: Payload, config: ResolvedConfig): CheckResult[] {
   const results: CheckResult[] = []
-  const available = payload.collections as Record<string, { config: { fields: FieldLike[]; upload?: unknown } } | undefined>
+  const available = payload.collections as Record<string, { config: { fields: FieldLike[]; upload?: unknown; auth?: unknown } } | undefined>
   for (const [kind, { to }] of Object.entries(config.collections)) {
     const label = `Collection ${to} (WordPress ${kind})`
     const collection = available[to]
@@ -75,6 +75,15 @@ export function preflight(payload: Payload, config: ResolvedConfig): CheckResult
         status: 'fail',
         title: `${label} is not an upload collection`,
         detail: `Media files need an upload collection. Add upload: { … } to the ${to} collection or point collections.media.to at your upload collection.`,
+      })
+      continue
+    }
+    // Only authors may become accounts (authors.createAccounts); content in an auth collection would be login records.
+    if (kind !== 'author' && collection.config.auth) {
+      results.push({
+        status: 'fail',
+        title: `${label} is an auth collection`,
+        detail: `Its documents are login accounts. Point collections.${kind}.to at a collection without auth; only collections.author may map into one (with authors.createAccounts).`,
       })
       continue
     }

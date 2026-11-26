@@ -110,7 +110,8 @@ function tokenize(src: string): Token[] | undefined {
     }
     if (OPERATOR.test(c)) {
       let j = i
-      while (j < n && OPERATOR.test(src[j]!) && !(src[j] === '/' && (src[j + 1] === '/' || src[j + 1] === '*'))) j++
+      // A run ends before a comment and before `?>`, which leaves PHP mode (`$i++?>` is `++` then `?>`).
+      while (j < n && OPERATOR.test(src[j]!) && !(src[j] === '/' && (src[j + 1] === '/' || src[j + 1] === '*')) && !(j > i && src[j] === '?' && src[j + 1] === '>')) j++
       out.push({ kind: 'op', text: src.slice(i, j) })
       i = j
       continue
@@ -121,8 +122,12 @@ function tokenize(src: string): Token[] | undefined {
   return out
 }
 
-/** An operator that assigns to the variable before it (`=`, `.=`, `??=`...), not a comparison or `=>`. */
-const isAssignment = (op: string) => op.endsWith('=') && !['==', '===', '!=', '!==', '<=', '>=', '<>'].includes(op)
+/**
+ * An operator that assigns to the variable before it, not a comparison or `=>`: `=`, `.=`, `??=`...,
+ * and runs that start with `=` and glue on what follows (`=&` by reference, `=@`, `=!`, `=-`, `=~`).
+ */
+const isAssignment = (op: string) =>
+  (op.endsWith('=') && !['==', '===', '!=', '!==', '<=', '>=', '<>'].includes(op)) || (op.startsWith('=') && !['==', '===', '=>'].includes(op) && !op.startsWith('=='))
 
 /**
  * `$table_prefix` from wp-config.php. Only the form WordPress writes counts: `$table_prefix = '...';`
