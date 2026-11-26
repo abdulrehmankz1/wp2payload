@@ -1,0 +1,88 @@
+name: Bug report
+description: Something was migrated wrong, skipped, or the command failed.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A security problem (something gets past the sanitizer or the media
+        checks, a credential leaks) must not go here: report it privately, see SECURITY.md.
+
+        Remove anything private before posting: passwords, Application Passwords, database URLs,
+        email addresses, client names and URLs you do not want public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command you ran and the CLI output. `--verbose` output helps.
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source type
+      options:
+        - rest (live site)
+        - wxr (export file)
+        - sql (SQL dump with uploads)
+        - wpress (All-in-One WP Migration)
+        - archive (zip or tar backup)
+        - scan only
+    validations:
+      required: true
+  - type: input
+    id: wp2payload-version
+    attributes:
+      label: wp2payload version
+      description: Output of `npx wp2payload --version`.
+    validations:
+      required: true
+  - type: input
+    id: payload-version
+    attributes:
+      label: Payload version and database adapter
+      placeholder: 3.93.0, @payloadcms/db-postgres
+    validations:
+      required: true
+  - type: input
+    id: wordpress-version
+    attributes:
+      label: WordPress version and SEO plugin
+      placeholder: 6.9, Yoast SEO 28.8
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version and operating system
+      placeholder: 22.12.0, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: report.json
+      description: |
+        Attach `.wp2payload/report.json` or paste the relevant part. It holds no passwords, and no
+        email addresses unless you ran with `--include-pii`. Anonymise titles and URLs if needed.
+      render: json
+  - type: textarea
+    id: input
+    attributes:
+      label: Smallest input that shows the problem
+      description: |
+        For content problems, the post's raw HTML with its block comments (`<!-- wp:... -->`) or the
+        REST response for it. Use inert samples only.
+      render: html
+  - type: textarea
+    id: config
+    attributes:
+      label: wp2payload.config.ts
+      description: With secrets removed. Secrets should come from environment variables anyway.
+      render: ts

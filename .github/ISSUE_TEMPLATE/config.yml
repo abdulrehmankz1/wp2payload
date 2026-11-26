@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/abdulrehmankz1/wp2payload/security/advisories/new
+    about: Report privately through GitHub. Never in a public issue. See SECURITY.md.
+  - name: Security policy
+    url: https://github.com/abdulrehmankz1/wp2payload/blob/main/SECURITY.md
+    about: Scope, response times and supported versions.
