@@ -416,6 +416,16 @@ git:
 - `state.json`: a cache of WordPress to Payload IDs. Deleting it loses nothing,
   because the database is the source of truth.
 
+## Docs
+
+- [CLI reference](docs/reference/cli.md) and [config reference](docs/reference/config.md)
+- [Report codes](docs/reference/codes.md): every warning, error and security finding
+- [Writing a custom transformer](docs/guides/custom-transformers.md)
+- [Migrating from a backup](docs/guides/migrating-from-a-backup.md)
+- [Security model](docs/security.md)
+- [Architecture decisions](docs/adr/), [roadmap](docs/roadmap.md) and [changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+
 ## Development
 
 ```bash
