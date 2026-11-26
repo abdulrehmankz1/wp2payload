@@ -51,6 +51,20 @@ describe('wpConfigPrefix', () => {
     for (const body of hostile) expect(wpConfigPrefix(php(body)), body).toMatchObject({ status: 'invalid' })
   })
 
+  it('treats glued assignments (=&, =@, =!, =-, =~) as assignments, so a later one cannot hide (SEC-P2)', () => {
+    expect(wpConfigPrefix(php("$table_prefix = 'spam_'; $r='wp_'; $table_prefix=&$r;"))).toMatchObject({ status: 'invalid' })
+    for (const op of ['=@', '=!', '=-', '=~', '=&']) {
+      expect(wpConfigPrefix(php(`$table_prefix = 'spam_'; $table_prefix${op}f();`)), op).toMatchObject({ status: 'invalid' })
+    }
+    expect(wpConfigPrefix(php("$table_prefix = 'wp_'; $ok = $table_prefix === 'x'; $m = [$table_prefix => 1];"))).toEqual({ status: 'found', prefix: 'wp_' })
+  })
+
+  it('leaves PHP mode at ?> even right after an operator (SEC-P2)', () => {
+    const r = wpConfigPrefix("<?php ${'table_prefix'}='wp_'; $i++?> $table_prefix = 'spam_'; <?php\n")
+    expect(r).not.toEqual({ status: 'found', prefix: 'spam_' })
+    expect(r).toEqual({ status: 'none' })
+  })
+
   it('never quotes the value in its reason', () => {
     const r = wpConfigPrefix(php("$table_prefix = '\u001b[31mevil; rm -rf';"))
     expect(r.status).toBe('invalid')

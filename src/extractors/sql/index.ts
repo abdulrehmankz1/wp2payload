@@ -96,6 +96,8 @@ export class SqlExtractor implements Extractor {
   /** The prefix in use: set by the index (configured or detected) before any rows are read again. */
   #prefix = ''
   #prefixInfo: TablePrefixInfo | undefined
+  /** Set when wp-config.php picked one of several installs: reported as DUMP_OTHER_SITES. */
+  #otherSites: string | undefined
   readonly #statuses: Set<string>
   readonly #seoPlugin: SeoPluginOption
   readonly #maxBytes: number | undefined
@@ -176,6 +178,7 @@ export class SqlExtractor implements Extractor {
 
   async *documents(): AsyncIterable<IRDocument> {
     const ix = await this.#indexOnce()
+    if (this.#otherSites) this.#onWarning?.({ code: 'DUMP_OTHER_SITES', detail: this.#otherSites })
     for (const [type, n] of ix.other) {
       this.#onWarning?.({ code: 'DOC_TYPE_UNMAPPED', detail: `Post type "${type}" (${n} item${n === 1 ? '' : 's'}) was not migrated: the SQL source migrates posts and pages` })
     }
@@ -273,7 +276,7 @@ export class SqlExtractor implements Extractor {
     if (explicit === undefined && this.#wpConfig?.status === 'invalid') note = `wp-config.php was ignored: ${this.#wpConfig.reason}`
     if (explicit !== undefined) {
       if (!scan.seen.get(explicit)?.has('posts')) {
-        const found = scan.installs()
+        const found = scan.installs
         throw new DumpError(
           'DUMP_NO_WORDPRESS',
           found.length
@@ -283,17 +286,23 @@ export class SqlExtractor implements Extractor {
       }
       prefix = explicit
       from = 'config'
-    } else if (hint !== undefined && scan.installs().includes(hint)) {
-      // wp-config.php names the install this backup belongs to, also when the dump holds others.
+    } else if (hint !== undefined && scan.installs.includes(hint)) {
+      // wp-config.php names the install this backup belongs to, also when the dump holds others;
+      // those are named, so a planted wp-config.php cannot pick a site unnoticed (SEC-P3).
       prefix = hint
       from = 'wp-config.php'
+      const others = scan.installs.filter((p) => p !== hint)
+      if (others.length) {
+        note = `The dump also holds other WordPress sites, with the table prefixes ${quoted(others)}; the one wp-config.php names was read. Set source.tablePrefix to choose another.`
+        this.#otherSites = note
+      }
     } else {
       if (hint !== undefined) {
         note = `wp-config.php was ignored: the dump has no complete set of tables with its prefix ${quoted([hint])}`
         // Rows were read for the wp-config.php prefix only; read again for every install.
         scan = await this.#scan(undefined)
       }
-      const installs = scan.installs()
+      const installs = scan.installs
       if (installs.length > 1) {
         throw new DumpError(
           'DUMP_MULTIPLE_SITES',
@@ -328,7 +337,8 @@ export class SqlExtractor implements Extractor {
   async #scan(only: string | undefined): Promise<TableScan> {
     const seen = new Map<string, Set<Table>>()
     const builders = new Map<string, IndexBuilder>()
-    const installs = () => [...seen].filter(([, t]) => INSTALL_TABLES.every((name) => t.has(name))).map(([p]) => p)
+    // Kept as tables arrive: each table event costs O(1), whatever the number of prefixes.
+    const installs: string[] = []
     let stopped = false
     const tables = {
       has: (name: string) => {
@@ -342,11 +352,23 @@ export class SqlExtractor implements Extractor {
       if (!s) continue
       if (e.kind === 'table') {
         let names = seen.get(s.prefix)
-        if (!names) seen.set(s.prefix, (names = new Set()))
+        if (!names) {
+          // A real dump has a handful of prefixes; a hostile one can name millions (SEC-P1).
+          if (seen.size >= MAX_PREFIXES) {
+            if (only === undefined) throw new DumpError('DUMP_TOO_MANY_PREFIXES', TOO_MANY_PREFIXES)
+            // With a known prefix only its rows are read: further names are not worth tracking.
+            if (s.prefix !== only) continue
+          }
+          seen.set(s.prefix, (names = new Set()))
+        }
+        if (names.has(s.table)) continue
         names.add(s.table)
-        if (only === undefined && installs().length > 1) {
-          stopped = true
-          break
+        if (INSTALL_TABLES.includes(s.table) && INSTALL_TABLES.every((t) => names.has(t))) {
+          installs.push(s.prefix)
+          if (only === undefined && installs.length > 1) {
+            stopped = true
+            break
+          }
         }
         continue
       }
@@ -361,11 +383,15 @@ export class SqlExtractor implements Extractor {
 /** The tables that make a prefix a WordPress install. */
 const INSTALL_TABLES: readonly Table[] = ['posts', 'postmeta', 'options']
 
+/** Distinct table prefixes a dump may name before it is refused (bounds time and memory, SEC-P1). */
+export const MAX_PREFIXES = 1000
+const TOO_MANY_PREFIXES = `The dump names WordPress tables with over ${MAX_PREFIXES} different prefixes; it was not read further.\nA real backup has a few. If this is a trusted multisite dump, export the one site to migrate.`
+
 interface TableScan {
   seen: Map<string, Set<Table>>
   builders: Map<string, IndexBuilder>
   /** Prefixes that have every table of INSTALL_TABLES, in dump order. */
-  installs(): string[]
+  installs: string[]
   /** The pass stopped early, at the second install. */
   stopped: boolean
 }
