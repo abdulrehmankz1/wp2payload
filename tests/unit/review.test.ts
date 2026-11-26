@@ -27,7 +27,11 @@ async function seed() {
     ['script', { code: 'SEC_SCRIPT_TAG', severity: 'high', action: 'quarantined', doc: 'post:1', detail: '<script>' }, '<script>alert(1)</script>\u001b[2J'],
   ]
   const ids: string[] = []
-  for (const [name, finding, text] of items) ids.push(await writeQuarantine(root, { kind: 'content', name, text, finding }))
+  for (const [name, finding, text] of items) {
+    ids.push(await writeQuarantine(root, { kind: 'content', name, text, finding }))
+    // Review lists items by quarantine time; distinct times keep the seeded order on fast machines.
+    await new Promise((r) => setTimeout(r, 5))
+  }
   return ids
 }
 
